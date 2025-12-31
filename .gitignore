@@ -1,0 +1,20 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+uv.lock
+
+# Nix
+result
+.direnv/
+
+# Build artifacts
+*.o
+*.s19
+*.luac
+
+# Editor
+.DS_Store
+*~
+*.bak
+CLAUDE.md

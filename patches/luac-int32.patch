@@ -1,0 +1,125 @@
+diff -ruN a/src/lmathlib.c b/src/lmathlib.c
+--- a/src/lmathlib.c	2007-12-27 08:02:25
++++ b/src/lmathlib.c	2025-12-29 14:13:34
+@@ -17,6 +17,19 @@
+ #include "lualib.h"
+ 
+ 
++/* Integer power function for luai_numpow */
++int luai_ipow(int base, int exp) {
++  int result = 1;
++  if (exp < 0) return 0;
++  while (exp > 0) {
++    if (exp & 1) result *= base;
++    exp >>= 1;
++    base *= base;
++  }
++  return result;
++}
++
++
+ #undef PI
+ #define PI (3.14159265358979323846)
+ #define RADIANS_PER_DEGREE (PI/180.0)
+diff -ruN a/src/luaconf.h b/src/luaconf.h
+--- a/src/luaconf.h	2008-02-11 11:25:08
++++ b/src/luaconf.h	2025-12-29 14:13:25
+@@ -501,86 +501,32 @@
+ ** ===================================================================
+ */
+ 
+-#define LUA_NUMBER_DOUBLE
+-#define LUA_NUMBER	double
++/* Integer-only Lua for 6809 bytecode compatibility */
++#define LUA_NUMBER	int
++#define LUAI_UACNUMBER	int
+ 
+-/*
+-@@ LUAI_UACNUMBER is the result of an 'usual argument conversion'
+-@* over a number.
+-*/
+-#define LUAI_UACNUMBER	double
+-
+-
+-/*
+-@@ LUA_NUMBER_SCAN is the format for reading numbers.
+-@@ LUA_NUMBER_FMT is the format for writing numbers.
+-@@ lua_number2str converts a number to a string.
+-@@ LUAI_MAXNUMBER2STR is maximum size of previous conversion.
+-@@ lua_str2number converts a string to a number.
+-*/
+-#define LUA_NUMBER_SCAN		"%lf"
+-#define LUA_NUMBER_FMT		"%.14g"
++#define LUA_NUMBER_SCAN		"%d"
++#define LUA_NUMBER_FMT		"%d"
+ #define lua_number2str(s,n)	sprintf((s), LUA_NUMBER_FMT, (n))
+-#define LUAI_MAXNUMBER2STR	32 /* 16 digits, sign, point, and \0 */
+-#define lua_str2number(s,p)	strtod((s), (p))
++#define LUAI_MAXNUMBER2STR	12
++#define lua_str2number(s,p)	strtol((s), (p), 10)
+ 
+-
+-/*
+-@@ The luai_num* macros define the primitive operations over numbers.
+-*/
+-#if defined(LUA_CORE)
+-#include <math.h>
++/* Integer math operations */
++int luai_ipow(int base, int exp);
+ #define luai_numadd(a,b)	((a)+(b))
+ #define luai_numsub(a,b)	((a)-(b))
+ #define luai_nummul(a,b)	((a)*(b))
+ #define luai_numdiv(a,b)	((a)/(b))
+-#define luai_nummod(a,b)	((a) - floor((a)/(b))*(b))
+-#define luai_numpow(a,b)	(pow(a,b))
++#define luai_nummod(a,b)	((a)%(b))
++#define luai_numpow(a,b)	(luai_ipow(a,b))
+ #define luai_numunm(a)		(-(a))
+ #define luai_numeq(a,b)		((a)==(b))
+ #define luai_numlt(a,b)		((a)<(b))
+ #define luai_numle(a,b)		((a)<=(b))
+-#define luai_numisnan(a)	(!luai_numeq((a), (a)))
+-#endif
++#define luai_numisnan(a)	(0)
+ 
+-
+-/*
+-@@ lua_number2int is a macro to convert lua_Number to int.
+-@@ lua_number2integer is a macro to convert lua_Number to lua_Integer.
+-** CHANGE them if you know a faster way to convert a lua_Number to
+-** int (with any rounding method and without throwing errors) in your
+-** system. In Pentium machines, a naive typecast from double to int
+-** in C is extremely slow, so any alternative is worth trying.
+-*/
+-
+-/* On a Pentium, resort to a trick */
+-#if defined(LUA_NUMBER_DOUBLE) && !defined(LUA_ANSI) && !defined(__SSE2__) && \
+-    (defined(__i386) || defined (_M_IX86) || defined(__i386__))
+-
+-/* On a Microsoft compiler, use assembler */
+-#if defined(_MSC_VER)
+-
+-#define lua_number2int(i,d)   __asm fld d   __asm fistp i
+-#define lua_number2integer(i,n)		lua_number2int(i, n)
+-
+-/* the next trick should work on any Pentium, but sometimes clashes
+-   with a DirectX idiosyncrasy */
+-#else
+-
+-union luai_Cast { double l_d; long l_l; };
+-#define lua_number2int(i,d) \
+-  { volatile union luai_Cast u; u.l_d = (d) + 6755399441055744.0; (i) = u.l_l; }
+-#define lua_number2integer(i,n)		lua_number2int(i, n)
+-
+-#endif
+-
+-
+-/* this option always works, but may be slow */
+-#else
+ #define lua_number2int(i,d)	((i)=(int)(d))
+ #define lua_number2integer(i,d)	((i)=(lua_Integer)(d))
+-
+-#endif
+ 
+ /* }================================================================== */
+ 

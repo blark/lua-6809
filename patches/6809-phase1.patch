@@ -1,0 +1,652 @@
+diff -ruN a/src/ldo.c b/src/ldo.c
+--- a/src/ldo.c	1969-12-31 19:00:01.000000000 -0500
++++ b/src/ldo.c	2025-12-30 15:54:03.009122462 -0500
+@@ -110,11 +110,14 @@
+ 
+ int luaD_rawrunprotected (lua_State *L, Pfunc f, void *ud) {
+   struct lua_longjmp lj;
++  /* gcc6809 bug workaround: volatile prevents wrong stack offset in indirect call */
++  volatile Pfunc f_copy = f;
++  volatile void *ud_copy = ud;
+   lj.status = 0;
+   lj.previous = L->errorJmp;  /* chain new error handler */
+   L->errorJmp = &lj;
+   LUAI_TRY(L, &lj,
+-    (*f)(L, ud);
++    (*f_copy)(L, (void*)ud_copy);
+   );
+   L->errorJmp = lj.previous;  /* restore old error handler */
+   return lj.status;
+diff -ruN a/src/lmem.c b/src/lmem.c
+--- a/src/lmem.c	1969-12-31 19:00:01.000000000 -0500
++++ b/src/lmem.c	2025-12-29 16:19:05.124960006 -0500
+@@ -75,8 +75,11 @@
+ */
+ void *luaM_realloc_ (lua_State *L, void *block, size_t osize, size_t nsize) {
+   global_State *g = G(L);
++  /* gcc6809 workaround: copy function pointer to local before call */
++  volatile lua_Alloc frealloc_copy = g->frealloc;
++  volatile void *ud_copy = g->ud;
+   lua_assert((osize == 0) == (block == NULL));
+-  block = (*g->frealloc)(g->ud, block, osize, nsize);
++  block = (*frealloc_copy)((void*)ud_copy, block, osize, nsize);
+   if (block == NULL && nsize > 0)
+     luaD_throw(L, LUA_ERRMEM);
+   lua_assert((nsize == 0) == (block == NULL));
+diff -ruN a/src/lstate.c b/src/lstate.c
+--- a/src/lstate.c	1969-12-31 19:00:01.000000000 -0500
++++ b/src/lstate.c	2025-12-31 11:17:51.849100050 -0500
+@@ -144,7 +144,11 @@
+   int i;
+   lua_State *L;
+   global_State *g;
+-  void *l = (*f)(ud, NULL, 0, state_size(LG));
++  void *l;
++  /* gcc6809 workaround: copy function pointer to local */
++  volatile lua_Alloc f_copy = f;
++  volatile size_t sz = state_size(LG);
++  l = (*f_copy)(ud, NULL, 0, sz);
+   if (l == NULL) return NULL;
+   L = tostate(l);
+   g = &((LG *)L)->g;
+@@ -179,13 +183,17 @@
+   g->gcstepmul = LUAI_GCMUL;
+   g->gcdept = 0;
+   for (i=0; i<NUM_TAGS; i++) g->mt[i] = NULL;
+-  if (luaD_rawrunprotected(L, f_luaopen, NULL) != 0) {
+-    /* memory allocation error: free partial state */
+-    close_state(L);
+-    L = NULL;
++  {
++    /* gcc6809 workaround: copy function pointer to local before call */
++    volatile Pfunc f_open = f_luaopen;
++    if (luaD_rawrunprotected(L, (Pfunc)f_open, NULL) != 0) {
++      /* memory allocation error: free partial state */
++      close_state(L);
++      L = NULL;
++    }
++    else
++      luai_userstateopen(L);
+   }
+-  else
+-    luai_userstateopen(L);
+   return L;
+ }
+ 
+diff -ruN a/src/lua.h b/src/lua.h
+--- a/src/lua.h	1969-12-31 19:00:01.000000000 -0500
++++ b/src/lua.h	2025-12-28 23:41:15.418429588 -0500
+@@ -84,7 +84,7 @@
+ 
+ 
+ /* minimum Lua stack available to a C function */
+-#define LUA_MINSTACK	20
++#define LUA_MINSTACK	8  /* reduced for 6809 */
+ 
+ 
+ /*
+diff -ruN a/src/lua6809.c b/src/lua6809.c
+--- a/src/lua6809.c	1969-12-31 19:00:00.000000000 -0500
++++ b/src/lua6809.c	2025-12-31 10:07:11.214348775 -0500
+@@ -0,0 +1,345 @@
++/*
++** 6809-specific stubs and implementations for Lua
++*/
++
++#include "lua.h"
++#include "lauxlib.h"
++#include <stddef.h>
++#include <stdio.h>
++#include <stdlib.h>
++
++/*
++** Memory-mapped I/O for emulator output
++** NOTE: Must be OUTSIDE stack range ($F800-$FFF0) to avoid accidental output
++** when PSHS writes to stack. Using $F7F0 just before stack area.
++*/
++static volatile char * const OUTPUT_ADDR = (volatile char*)0xF7F0;
++
++/* Integer power function for luai_numpow */
++long luai_ipow(long base, long exp) {
++  long result = 1;
++  if (exp < 0) return 0;  /* no negative exponents in integer math */
++  while (exp > 0) {
++    if (exp & 1) result = result * base;
++    exp >>= 1;
++    base = base * base;
++  }
++  return result;
++}
++
++/*
++** Stubs for parser/lexer/dumper - we only run pre-compiled bytecode
++** This allows us to exclude lparser.c, llex.c, lcode.c, ldump.c
++*/
++#include "lparser.h"
++#include "llex.h"
++#include "lundump.h"
++
++Proto *luaY_parser (lua_State *L, ZIO *z, Mbuffer *buff, const char *name) {
++  (void)z; (void)buff; (void)name;
++  luaL_error(L, "parser not available");
++  return NULL;
++}
++
++void luaX_init (lua_State *L) {
++  (void)L;
++}
++
++int luaU_dump (lua_State *L, const Proto *f, lua_Writer w, void *data, int strip) {
++  (void)L; (void)f; (void)w; (void)data; (void)strip;
++  return 1;  /* error: dumping not supported */
++}
++
++
++/*
++** Simple sbrk/malloc implementation for bare metal 6809
++** Heap starts after code and grows upward
++*/
++
++/* Heap area: $EB00 - $F7F0 (about 3KB)
++ * Code ends at ~$E7AC. Bytecode at $E800. Heap starts after bytecode.
++ * I/O port at $F7F0 (reserved, not in heap or stack).
++ * Stack grows down from $FFF0 to $F800 (~2KB). */
++#define HEAP_START ((char*)0xEB00)
++#define HEAP_END   ((char*)0xF7F0)
++
++static char *heap_break = HEAP_START;
++
++void *sbrk(int incr) {
++  char *prev_break = heap_break;
++  if (incr == 0) {
++    return prev_break;
++  }
++  if (heap_break + incr > HEAP_END || heap_break + incr < HEAP_START) {
++    return (void*)-1;  /* Out of memory */
++  }
++  heap_break += incr;
++  return prev_break;
++}
++
++/* Also provide _sbrk for newlib compatibility */
++void *_sbrk(int incr) {
++  return sbrk(incr);
++}
++
++static char *heap_ptr = NULL;
++
++/* Each allocation has a 2-byte size header */
++void *malloc(size_t size) {
++  unsigned char *block;
++  void *new_ptr;
++  size_t total = size + 2;  /* 2 bytes for size header */
++
++  if (heap_ptr == NULL) {
++    heap_ptr = sbrk(0);
++  }
++  block = (unsigned char*)heap_ptr;
++  new_ptr = sbrk((int)total);
++  if (new_ptr == (void*)-1) {
++    return NULL;
++  }
++  heap_ptr = (char*)heap_ptr + total;
++  /* Store size in header (big-endian) */
++  block[0] = (size >> 8) & 0xFF;
++  block[1] = size & 0xFF;
++  return block + 2;  /* Return pointer past header */
++}
++
++void *realloc(void *ptr, size_t size) {
++  unsigned char *old;
++  size_t old_size, copy_size;
++  unsigned char *new_block;
++  size_t i;
++
++  if (ptr == NULL) return malloc(size);
++
++  /* Read old size from header */
++  old = (unsigned char*)ptr - 2;
++  old_size = (old[0] << 8) | old[1];
++
++  new_block = malloc(size);
++  if (new_block == NULL) return NULL;
++
++  /* Copy old data to new block */
++  copy_size = (old_size < size) ? old_size : size;
++  for (i = 0; i < copy_size; i++) {
++    new_block[i] = ((unsigned char*)ptr)[i];
++  }
++  return new_block;
++}
++
++void free(void *ptr) {
++  /* Simple bump allocator - no free */
++  (void)ptr;
++}
++
++/*
++** Number conversion (simplified)
++*/
++long strtol(const char *s, char **endptr, int base) {
++  long result = 0;
++  int neg = 0;
++  while (*s == ' ') s++;
++  if (*s == '-') { neg = 1; s++; }
++  else if (*s == '+') s++;
++
++  if (base == 0) {
++    if (*s == '0' && (s[1] == 'x' || s[1] == 'X')) { base = 16; s += 2; }
++    else if (*s == '0') { base = 8; s++; }
++    else base = 10;
++  }
++
++  while (*s) {
++    int digit;
++    if (*s >= '0' && *s <= '9') digit = *s - '0';
++    else if (*s >= 'a' && *s <= 'f') digit = *s - 'a' + 10;
++    else if (*s >= 'A' && *s <= 'F') digit = *s - 'A' + 10;
++    else break;
++    if (digit >= base) break;
++    result = result * base + digit;
++    s++;
++  }
++  if (endptr) *endptr = (char*)s;
++  return neg ? -result : result;
++}
++
++unsigned long strtoul(const char *s, char **endptr, int base) {
++  return (unsigned long)strtol(s, endptr, base);
++}
++
++/*
++** Minimal sprintf (numbers only)
++*/
++int sprintf(char *buf, const char *fmt, ...) {
++  /* Very minimal - just handle %ld for Lua numbers */
++  /* This is a stub - real impl would use va_list */
++  buf[0] = '?';
++  buf[1] = '\0';
++  return 1;
++}
++
++/*
++** Stubs for file I/O (not supported on bare metal)
++** These are defined in newlib headers but not implemented
++*/
++#include <reent.h>
++FILE *fopen(const char *path, const char *mode) { (void)path; (void)mode; return NULL; }
++FILE *freopen(const char *path, const char *mode, FILE *f) { (void)path; (void)mode; (void)f; return NULL; }
++int fclose(FILE *f) { (void)f; return 0; }
++size_t fread(void *ptr, size_t size, size_t n, FILE *f) { (void)ptr; (void)size; (void)n; (void)f; return 0; }
++int fprintf(FILE *f, const char *fmt, ...) { (void)f; (void)fmt; return 0; }
++int ungetc(int c, FILE *f) { (void)c; (void)f; return -1; }
++int __srget_r(struct _reent *r, FILE *f) { (void)r; (void)f; return -1; }
++
++void abort(void) { while(1); }
++void exit(int code) { (void)code; while(1); }
++int atexit(void (*func)(void)) { (void)func; return 0; }
++
++static void emit_char(char c) {
++  *OUTPUT_ADDR = c;
++}
++
++static void emit_string(const char *s) {
++  while (*s) emit_char(*s++);
++}
++
++/* emit_int using subtraction only - avoids broken div/mod in gcc6809 libgcc */
++static void emit_int(int n) {
++  int d, started;
++  if (n < 0) { emit_char('-'); n = -n; }
++  if (n == 0) { emit_char('0'); return; }
++  started = 0;
++  d = 0; while (n >= 10000) { n -= 10000; d++; }
++  if (d) { emit_char('0' + d); started = 1; }
++  d = 0; while (n >= 1000) { n -= 1000; d++; }
++  if (d || started) { emit_char('0' + d); started = 1; }
++  d = 0; while (n >= 100) { n -= 100; d++; }
++  if (d || started) { emit_char('0' + d); started = 1; }
++  d = 0; while (n >= 10) { n -= 10; d++; }
++  if (d || started) { emit_char('0' + d); }
++  emit_char('0' + n);
++}
++
++/* emit_long for 32-bit values using subtraction (avoids gcc6809 ICE with div/mod loop) */
++static void emit_long(long n) {
++  int neg = 0;
++  int d, started = 0;
++
++  /* Special case: INT_MIN cannot be negated without overflow */
++  if (n == (-2147483647L - 1)) {
++    emit_string("-2147483648");
++    return;
++  }
++
++  if (n < 0) { neg = 1; n = -n; }
++  if (neg) emit_char('-');
++  if (n == 0) { emit_char('0'); return; }
++
++  /* Billions */
++  d = 0; while (n >= 1000000000L) { n -= 1000000000L; d++; }
++  if (d) { emit_char('0' + d); started = 1; }
++  /* Hundred millions */
++  d = 0; while (n >= 100000000L) { n -= 100000000L; d++; }
++  if (d || started) { emit_char('0' + d); started = 1; }
++  /* Ten millions */
++  d = 0; while (n >= 10000000L) { n -= 10000000L; d++; }
++  if (d || started) { emit_char('0' + d); started = 1; }
++  /* Millions */
++  d = 0; while (n >= 1000000L) { n -= 1000000L; d++; }
++  if (d || started) { emit_char('0' + d); started = 1; }
++  /* Hundred thousands */
++  d = 0; while (n >= 100000L) { n -= 100000L; d++; }
++  if (d || started) { emit_char('0' + d); started = 1; }
++  /* Ten thousands */
++  d = 0; while (n >= 10000L) { n -= 10000L; d++; }
++  if (d || started) { emit_char('0' + d); started = 1; }
++  /* Thousands */
++  d = 0; while (n >= 1000L) { n -= 1000L; d++; }
++  if (d || started) { emit_char('0' + d); started = 1; }
++  /* Hundreds */
++  d = 0; while (n >= 100L) { n -= 100L; d++; }
++  if (d || started) { emit_char('0' + d); started = 1; }
++  /* Tens */
++  d = 0; while (n >= 10L) { n -= 10L; d++; }
++  if (d || started) { emit_char('0' + d); }
++  /* Ones */
++  emit_char('0' + (int)n);
++}
++
++/*
++** Bytecode loading from memory
++*/
++#define BYTECODE_SIZE_ADDR ((volatile unsigned char*)0xE800)
++#define BYTECODE_DATA_ADDR ((const char*)0xE802)
++
++static int get_bytecode_size(void) {
++  return (BYTECODE_SIZE_ADDR[0] << 8) | BYTECODE_SIZE_ADDR[1];
++}
++
++int main(void) {
++  lua_State *L;
++  int bc_size;
++  int status;
++
++  emit_string("Lua6809\n");
++
++  bc_size = get_bytecode_size();
++  if (bc_size == 0) {
++    emit_string("No bytecode\n");
++    return 1;
++  }
++
++  emit_string("BC:");
++  emit_int(bc_size);
++  emit_string(" bytes\n");
++
++  L = luaL_newstate();
++  if (L == NULL) {
++    emit_string("OOM!\n");
++    return 1;
++  }
++
++  status = luaL_loadbuffer(L, BYTECODE_DATA_ADDR, bc_size, "=mem");
++  if (status != 0) {
++    emit_string("Load err ");
++    emit_int(status);
++    emit_char(':');
++    if (lua_isstring(L, -1)) {
++      emit_string(lua_tostring(L, -1));
++    }
++    emit_char('\n');
++    lua_close(L);
++    return 1;
++  }
++
++  status = lua_pcall(L, 0, LUA_MULTRET, 0);
++  if (status != 0) {
++    emit_string("Run err:");
++    if (lua_isstring(L, -1)) {
++      emit_string(lua_tostring(L, -1));
++    }
++    emit_char('\n');
++    lua_close(L);
++    return 1;
++  }
++
++  if (lua_gettop(L) > 0) {
++    emit_string("=> ");
++    if (lua_isnil(L, -1)) {
++      emit_string("nil");
++    } else if (lua_isboolean(L, -1)) {
++      emit_string(lua_toboolean(L, -1) ? "true" : "false");
++    } else if (lua_isnumber(L, -1)) {
++      emit_long(lua_tointeger(L, -1));
++    } else if (lua_isstring(L, -1)) {
++      emit_string(lua_tostring(L, -1));
++    } else {
++      /* TODO: table, function, userdata, thread not yet supported */
++      emit_string("(unsupported type)");
++    }
++    emit_char('\n');
++  }
++
++  lua_close(L);
++  return 0;
++}
+diff -ruN a/src/luaconf.h b/src/luaconf.h
+--- a/src/luaconf.h	1969-12-31 19:00:01.000000000 -0500
++++ b/src/luaconf.h	2025-12-30 11:21:02.148790569 -0500
+@@ -44,6 +44,19 @@
+ #define LUA_DL_DYLD		/* does not need extra library */
+ #endif
+ 
++/*
++@@ LUA_USE_6809 configures Lua for the MC6809 processor.
++** - Integer-only math (no floating point)
++** - Reduced memory limits
++** - No dynamic library loading
++** - No POSIX features
++*/
++#if defined(LUA_USE_6809)
++#define LUA_ANSI
++#undef LUA_USE_POSIX
++#undef LUA_USE_DLOPEN
++#undef LUA_DL_DYLD
++#endif
+ 
+ 
+ /*
+@@ -140,7 +153,11 @@
+ ** CHANGE that if ptrdiff_t is not adequate on your machine. (On most
+ ** machines, ptrdiff_t gives a good choice between int or long.)
+ */
++#ifdef LUA_USE_6809
++#define LUA_INTEGER	long  /* 32-bit on 6809, ptrdiff_t is only 16-bit */
++#else
+ #define LUA_INTEGER	ptrdiff_t
++#endif
+ 
+ 
+ /*
+@@ -259,7 +276,7 @@
+ @* stand-alone interpreter.
+ ** CHANGE it if you need longer lines.
+ */
+-#define LUA_MAXINPUT	512
++#define LUA_MAXINPUT	128  /* reduced for 6809 */
+ 
+ 
+ /*
+@@ -416,6 +433,13 @@
+ #define LUAI_MAXINT32	INT_MAX
+ #define LUAI_UMEM	size_t
+ #define LUAI_MEM	ptrdiff_t
++#elif defined(LUA_USE_6809)
++/* 6809: 16-bit memory counters (64KB max) */
++#define LUAI_UINT32	unsigned long
++#define LUAI_INT32	long
++#define LUAI_MAXINT32	LONG_MAX
++#define LUAI_UMEM	unsigned int  /* 16-bit: max 64KB */
++#define LUAI_MEM	int
+ #else
+ /* 16-bit ints */
+ #define LUAI_UINT32	unsigned long
+@@ -432,7 +456,7 @@
+ ** arbitrary; its only purpose is to stop infinite recursion before
+ ** exhausting memory.
+ */
+-#define LUAI_MAXCALLS	20000
++#define LUAI_MAXCALLS	100  /* reduced for 6809 */
+ 
+ 
+ /*
+@@ -443,7 +467,7 @@
+ ** functions to consume unlimited stack space. (must be smaller than
+ ** -LUA_REGISTRYINDEX)
+ */
+-#define LUAI_MAXCSTACK	8000
++#define LUAI_MAXCSTACK	128  /* reduced for 6809 */
+ 
+ 
+ 
+@@ -465,27 +489,27 @@
+ @@ LUAI_MAXCCALLS is the maximum depth for nested C calls (short) and
+ @* syntactical nested non-terminals in a program.
+ */
+-#define LUAI_MAXCCALLS		200
++#define LUAI_MAXCCALLS		20  /* reduced for 6809 */
+ 
+ 
+ /*
+ @@ LUAI_MAXVARS is the maximum number of local variables per function
+ @* (must be smaller than 250).
+ */
+-#define LUAI_MAXVARS		200
++#define LUAI_MAXVARS		50  /* reduced for 6809 */
+ 
+ 
+ /*
+ @@ LUAI_MAXUPVALUES is the maximum number of upvalues per function
+ @* (must be smaller than 250).
+ */
+-#define LUAI_MAXUPVALUES	60
++#define LUAI_MAXUPVALUES	20  /* reduced for 6809 */
+ 
+ 
+ /*
+ @@ LUAL_BUFFERSIZE is the buffer size used by the lauxlib buffer system.
+ */
+-#define LUAL_BUFFERSIZE		BUFSIZ
++#define LUAL_BUFFERSIZE		128  /* reduced for 6809 */
+ 
+ /* }================================================================== */
+ 
+@@ -501,14 +525,15 @@
+ ** ===================================================================
+ */
+ 
+-#define LUA_NUMBER_DOUBLE
+-#define LUA_NUMBER	double
++/* #define LUA_NUMBER_DOUBLE */
++#define LUA_NUMBER_INT32
++#define LUA_NUMBER	long  /* 32-bit on 6809 */
+ 
+ /*
+ @@ LUAI_UACNUMBER is the result of an 'usual argument conversion'
+ @* over a number.
+ */
+-#define LUAI_UACNUMBER	double
++#define LUAI_UACNUMBER	long
+ 
+ 
+ /*
+@@ -518,29 +543,37 @@
+ @@ LUAI_MAXNUMBER2STR is maximum size of previous conversion.
+ @@ lua_str2number converts a string to a number.
+ */
+-#define LUA_NUMBER_SCAN		"%lf"
+-#define LUA_NUMBER_FMT		"%.14g"
++#define LUA_NUMBER_SCAN		"%ld"
++#define LUA_NUMBER_FMT		"%ld"
+ #define lua_number2str(s,n)	sprintf((s), LUA_NUMBER_FMT, (n))
+-#define LUAI_MAXNUMBER2STR	32 /* 16 digits, sign, point, and \0 */
+-#define lua_str2number(s,p)	strtod((s), (p))
++#define LUAI_MAXNUMBER2STR	12 /* sign + 10 digits + \0 */
++#define lua_str2number(s,p)	strtol((s), (p), 10)
+ 
+ 
+ /*
+ @@ The luai_num* macros define the primitive operations over numbers.
+ */
+ #if defined(LUA_CORE)
++#if defined(LUA_NUMBER_DOUBLE)
+ #include <math.h>
++#define luai_nummod(a,b)	((a) - floor((a)/(b))*(b))
++#define luai_numpow(a,b)	(pow(a,b))
++#define luai_numisnan(a)	(!luai_numeq((a), (a)))
++#else
++/* Integer math for 6809 */
++#define luai_nummod(a,b)	((a) % (b))
++long luai_ipow(long base, long exp);  /* defined in lmathlib.c */
++#define luai_numpow(a,b)	(luai_ipow(a,b))
++#define luai_numisnan(a)	(0)  /* integers are never NaN */
++#endif
+ #define luai_numadd(a,b)	((a)+(b))
+ #define luai_numsub(a,b)	((a)-(b))
+ #define luai_nummul(a,b)	((a)*(b))
+ #define luai_numdiv(a,b)	((a)/(b))
+-#define luai_nummod(a,b)	((a) - floor((a)/(b))*(b))
+-#define luai_numpow(a,b)	(pow(a,b))
+ #define luai_numunm(a)		(-(a))
+ #define luai_numeq(a,b)		((a)==(b))
+ #define luai_numlt(a,b)		((a)<(b))
+ #define luai_numle(a,b)		((a)<=(b))
+-#define luai_numisnan(a)	(!luai_numeq((a), (a)))
+ #endif
+ 
+ 
+diff -ruN a/src/lzio.c b/src/lzio.c
+--- a/src/lzio.c	1969-12-31 19:00:01.000000000 -0500
++++ b/src/lzio.c	2025-12-29 15:03:16.892226723 -0500
+@@ -22,8 +22,11 @@
+   size_t size;
+   lua_State *L = z->L;
+   const char *buff;
++  /* gcc6809 workaround: copy function pointer to local before call */
++  lua_Reader reader_local = z->reader;
++  void *data_local = z->data;
+   lua_unlock(L);
+-  buff = z->reader(L, z->data, &size);
++  buff = reader_local(L, data_local, &size);
+   lua_lock(L);
+   if (buff == NULL || size == 0) return EOZ;
+   z->n = size - 1;
+
+--- a/Makefile.6809	2025-12-31 11:18:00.450827000 -0500
++++ b/Makefile.6809	2025-12-30 20:01:37.171700896 -0500
+@@ -0,0 +1,24 @@
++# Makefile for Lua 5.1.5 on MC6809
++# Used by nix flake to build the VM
++
++CC ?= m6809-unknown-none-gcc
++CFLAGS += -DLUA_USE_6809 -DLUA_CORE -Os
++
++# Excluded: lparser, llex, lcode, ldump (stubs in lua6809.c for bytecode-only mode)
++SRCS = lapi.c ldebug.c ldo.c lfunc.c lgc.c lmem.c lobject.c lopcodes.c \
++       lstate.c lstring.c ltable.c ltm.c lundump.c lvm.c lzio.c lauxlib.c lua6809.c
++
++OBJS = $(SRCS:.c=.o)
++
++.PHONY: all clean
++
++all: lua.s19
++
++lua.s19: $(OBJS)
++	$(CC) $(LDFLAGS) -o $@ $(OBJS)
++
++%.o: %.c
++	$(CC) $(CFLAGS) -c $< -o $@
++
++clean:
++	rm -f $(OBJS) lua.s19
