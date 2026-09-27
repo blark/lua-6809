@@ -69,6 +69,32 @@ script.lua
 | `$F7F0` | 1B | Output port (memory-mapped I/O) |
 | `$F800-$FFF0` | ~2KB | Stack (grows down) |
 
+## Anachron8 Target
+
+A second build places the VM in the [Anachron8](https://git.sherwood.haus/blark/isp-6809)
+6809 computer's memory map (I/O at `$0000`, MON09 ROM at `$E000`, VRAM at `$C000`):
+
+| Address | Purpose |
+|---------|---------|
+| `$1000-$B125` | VM code + data (~41 KB; unused API functions left out with `LUA_SLIM`) |
+| end of program-`$BFFF` | Heap (~3.8 KB, start from the linker via `a8heap.s`) |
+| `$C000` | Output: 80x25 VRAM text screen, plus every character on the ACIA |
+| `$D000-$DBFF` | Bytecode (2-byte size, then the bytecode) |
+| below `$DF60` | Stack (MON09's user stack) |
+
+The VM is started with MON09's `G` at its entry point, `__start` (currently `$1007`; the
+S9 record of `lua-a8.s19` and `lua-a8.map` give it), and returns to MON09 with `SWI` when
+done, with `D=$1A8E` for a normal exit or `D=$DEAD` for `abort()`.
+
+```bash
+nix build .#vm-a8          # result/lua-a8.s19 (+ lua-a8.map)
+nix run .#test-a8          # test suite on the Anachron8 memory model (emu/anachron8.py)
+luac6809 -o prog.luac prog.lua && tools/bytecode_s19.py prog.luac   # prog.s19 at $D000
+```
+
+The Anachron8 memory model is strict: writes to ROM or unmapped I/O, and loads
+outside RAM, stop the run with a bus error.
+
 ## Getting Started
 
 Requires [Nix](https://nixos.org/) with flakes enabled.

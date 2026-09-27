@@ -21,8 +21,14 @@ from MC6809.components.cpu6809 import CPU
 
 from config.memory_layout import (
     BYTECODE_SIZE_ADDR, BYTECODE_DATA_ADDR,
-    STACK_TOP, Lua6809Config, Memory64K
+    STACK_TOP, Lua6809Config, Memory64K,
+    A8_BYTECODE_SIZE_ADDR, A8_BYTECODE_DATA_ADDR, A8_BYTECODE_MAX_SIZE,
+    A8_STACK_TOP, A8_STACK_BOTTOM, A8_ENTRY_CC,
 )
+from emu.anachron8 import ROM, BusError, new_memory
+
+SWI_OPCODE = 0x3F
+EXIT_OK, EXIT_ABORT = 0x1A8E, 0xDEAD  # D at the final SWI (lua6809.c exit/abort)
 
 
 def parse_s19(filename):
@@ -45,8 +51,77 @@ def parse_s19(filename):
     return data, start_addr
 
 
+def run_test_a8(s19_path, luac_file):
+    """Run on the Anachron8 memory model, entered the way MON09's G does."""
+    if not s19_path:
+        return None, "LUA6809_S19 not set"
+    data, start_addr = parse_s19(s19_path)
+    if not data:
+        return None, "Failed to load S19"
+    with open(luac_file, 'rb') as f:
+        bytecode = f.read()
+    if len(bytecode) > A8_BYTECODE_MAX_SIZE:
+        return None, f"bytecode {len(bytecode)} bytes > {A8_BYTECODE_MAX_SIZE}"
+
+    cfg, memory = new_memory()
+    try:
+        for addr, byte in sorted(data.items()):
+            memory.poke(addr, [byte])
+        memory.poke(A8_BYTECODE_SIZE_ADDR, [len(bytecode) >> 8, len(bytecode) & 0xFF])
+        memory.poke(A8_BYTECODE_DATA_ADDR, bytecode)
+    except BusError as e:
+        return None, f"load: {e}"
+
+    cpu = CPU(memory, cfg)
+    memory.cpu = cpu
+    cpu.program_counter.set(start_addr)
+    cpu.system_stack_pointer.set(A8_STACK_TOP)
+    cpu.set_cc(A8_ENTRY_CC)
+    cpu.direct_page.set(0)
+
+    # The VM ends with SWI, which hands control back to MON09 (the emulator
+    # doesn't implement SWI, so stop on it). Only exit()'s SWI with the
+    # EXIT_OK marker in D counts as finishing; anything else is a failure.
+    try:
+        for _ in range(50_000_000):
+            pc = cpu.program_counter.value
+            if pc >= ROM:
+                return None, f"jumped into the ROM at ${pc:04X}"
+            if memory.read_byte(pc) == SWI_OPCODE:
+                break
+            if cpu.system_stack_pointer.value < A8_STACK_BOTTOM:
+                return None, (f"stack overflow: S=${cpu.system_stack_pointer.value:04X} "
+                              f"below ${A8_STACK_BOTTOM:04X} at PC ${pc:04X}")
+            cpu.get_and_call_next_op()
+        else:
+            return None, "did not finish"
+    except BusError as e:
+        return None, f"bus error at PC ${cpu.last_op_address:04X}: {e}"
+    except Exception as e:
+        return None, f"CPU error: {e}"
+    d = cpu.accu_d.value
+    if d != EXIT_OK:
+        why = "abort()" if d == EXIT_ABORT else f"unexpected SWI (D=${d:04X})"
+        return None, f"{why} at PC ${pc:04X}"
+
+    output = "".join(memory.console_output)
+    # The VRAM screen must show the same text as the serial port.
+    lines = output.rstrip('\n').split('\n')
+    if all(len(l) <= 80 for l in lines):
+        shown = lines[-25:]
+        screen = memory.screen()[:len(shown)]
+        if screen != [l.rstrip() for l in shown]:
+            return None, f"screen {screen!r} differs from serial output {shown!r}"
+    for line in lines:
+        if line.startswith('=>'):
+            return line[2:].strip(), None
+    return None, output.strip() or "No result"
+
+
 def run_test(luac_file):
     s19_path = os.environ.get('LUA6809_S19')
+    if os.environ.get('LUA6809_TARGET') == 'anachron8':
+        return run_test_a8(s19_path, luac_file)
     if not s19_path:
         return None, "LUA6809_S19 not set"
 

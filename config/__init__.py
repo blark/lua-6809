@@ -1,2 +1,1 @@
-# Lua 6809 configuration package
-from .memory_layout import *
+# Lua 6809 configuration package: memory_layout (emulator), anachron8 (layout constants)

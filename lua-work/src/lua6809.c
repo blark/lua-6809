@@ -13,7 +13,9 @@
 ** NOTE: Must be OUTSIDE stack range ($F800-$FFF0) to avoid accidental output
 ** when PSHS writes to stack. Using $F7F0 just before stack area.
 */
+#ifndef LUA_A8
 static volatile char * const OUTPUT_ADDR = (volatile char*)0xF7F0;
+#endif
 
 /* Integer power function for luai_numpow */
 long luai_ipow(long base, long exp) {
@@ -60,13 +62,26 @@ int luaU_dump (lua_State *L, const Proto *f, lua_Writer w, void *data, int strip
  * Code ends at ~$E7AC. Bytecode at $E800. Heap starts after bytecode.
  * I/O port at $F7F0 (reserved, not in heap or stack).
  * Stack grows down from $FFF0 to $F800 (~2KB). */
+#ifdef LUA_A8
+/* Anachron8: the heap runs from the end of the program (a8heap.s, from the
+ * linker) up to VRAM at $C000. The stack is MON09's user stack below $DF60. */
+extern char *a8_heap_start;
+#define HEAP_START a8_heap_start
+#define HEAP_END   ((char*)0xC000)
+static char *heap_break;
+#else
 #define HEAP_START ((char*)0xEB00)
 #define HEAP_END   ((char*)0xF7F0)
 
 static char *heap_break = HEAP_START;
+#endif
 
 void *sbrk(int incr) {
-  char *prev_break = heap_break;
+  char *prev_break;
+#ifdef LUA_A8
+  if (heap_break == NULL) heap_break = HEAP_START;
+#endif
+  prev_break = heap_break;
   if (incr == 0) {
     return prev_break;
   }
@@ -191,13 +206,80 @@ int fprintf(FILE *f, const char *fmt, ...) { (void)f; (void)fmt; return 0; }
 int ungetc(int c, FILE *f) { (void)c; (void)f; return -1; }
 int __srget_r(struct _reent *r, FILE *f) { (void)r; (void)f; return -1; }
 
+#ifdef LUA_A8
+/* SWI hands control back to MON09, which shows the registers and prompts.
+ * D tells how the VM ended: $1A8E = normal exit, $DEAD = abort. */
+void abort(void) { for (;;) __asm__ volatile ("ldd\t#0xDEAD\n\tswi"); }
+void exit(int code) { (void)code; for (;;) __asm__ volatile ("ldd\t#0x1A8E\n\tswi"); }
+#else
 void abort(void) { while(1); }
 void exit(int code) { (void)code; while(1); }
+#endif
 int atexit(void (*func)(void)) { (void)func; return 0; }
 
+#ifdef LUA_A8
+/* Anachron8 console: every character goes to the ACIA (USB serial, what
+ * MON09 uses) and to an 80x25 text screen in VRAM. */
+#define ACIA_DATA  (*(volatile unsigned char *)0x0000)
+#define ACIA_STAT  (*(volatile unsigned char *)0x0001)
+#define ACIA_TDRE  0x10
+#define VRAM       ((volatile unsigned char *)0xC000)
+#define VRAM_ATTR  (VRAM + 2000)
+#define CURSOR_X   (VRAM[4000])
+#define CURSOR_Y   (VRAM[4001])
+#define COLS       80
+#define ROWS       25
+#define TEXT_ATTR  0x07   /* light grey on black */
+
+static unsigned char scr_x, scr_y, scr_ready;
+
+static void acia_putc(char c) {
+  while (!(ACIA_STAT & ACIA_TDRE))
+    ;
+  ACIA_DATA = c;
+}
+
+static void screen_init(void) {
+  int i;
+  for (i = 0; i < COLS * ROWS; i++) {
+    VRAM[i] = ' ';
+    VRAM_ATTR[i] = TEXT_ATTR;
+  }
+  scr_x = scr_y = 0;
+  scr_ready = 1;
+}
+
+static void screen_putc(char c) {
+  int i;
+  if (!scr_ready) screen_init();
+  if (c == '\n') {
+    scr_x = 0;
+    scr_y++;
+  } else if ((unsigned char)c < ' ') {
+    return;  /* other control characters don't reach the screen */
+  } else {
+    VRAM[scr_y * COLS + scr_x] = c;
+    if (++scr_x == COLS) { scr_x = 0; scr_y++; }
+  }
+  if (scr_y == ROWS) {
+    for (i = 0; i < COLS * (ROWS - 1); i++) VRAM[i] = VRAM[i + COLS];
+    for (; i < COLS * ROWS; i++) VRAM[i] = ' ';
+    scr_y = ROWS - 1;
+  }
+  CURSOR_X = scr_x;
+  CURSOR_Y = scr_y;
+}
+
+static void emit_char(char c) {
+  if (c == '\n') acia_putc('\r');
+  acia_putc(c);
+  screen_putc(c);
+}
+#else
 static void emit_char(char c) {
   *OUTPUT_ADDR = c;
 }
+#endif
 
 static void emit_string(const char *s) {
   while (*s) emit_char(*s++);
@@ -269,8 +351,13 @@ static void emit_long(long n) {
 /*
 ** Bytecode loading from memory
 */
+#ifdef LUA_A8
+#define BYTECODE_SIZE_ADDR ((volatile unsigned char*)0xD000)
+#define BYTECODE_DATA_ADDR ((const char*)0xD002)
+#else
 #define BYTECODE_SIZE_ADDR ((volatile unsigned char*)0xE800)
 #define BYTECODE_DATA_ADDR ((const char*)0xE802)
+#endif
 
 static int get_bytecode_size(void) {
   return (BYTECODE_SIZE_ADDR[0] << 8) | BYTECODE_SIZE_ADDR[1];

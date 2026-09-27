@@ -36,6 +36,9 @@ OUTPUT_ADDR = 0xF7F0  # Console output port
 STACK_BOTTOM = 0xF800  # Stack starts here (grows down)
 STACK_TOP = 0xFFF0     # Initial stack pointer
 
+# Anachron8 layout constants live in config/anachron8.py (no emulator imports).
+from .anachron8 import *  # noqa: E402,F401,F403
+
 
 class Lua6809Config(BaseConfig):
     """MC6809 emulator config for Lua VM"""

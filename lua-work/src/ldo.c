@@ -418,6 +418,7 @@ static int resume_error (lua_State *L, const char *msg) {
 }
 
 
+#ifndef LUA_SLIM
 LUA_API int lua_resume (lua_State *L, int nargs) {
   int status;
   lua_lock(L);
@@ -442,8 +443,10 @@ LUA_API int lua_resume (lua_State *L, int nargs) {
   lua_unlock(L);
   return status;
 }
+#endif
 
 
+#ifndef LUA_SLIM
 LUA_API int lua_yield (lua_State *L, int nresults) {
   luai_userstateyield(L, nresults);
   lua_lock(L);
@@ -454,6 +457,7 @@ LUA_API int lua_yield (lua_State *L, int nresults) {
   lua_unlock(L);
   return -1;
 }
+#endif
 
 
 int luaD_pcall (lua_State *L, Pfunc func, void *u,

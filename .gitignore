@@ -18,3 +18,5 @@ result
 *~
 *.bak
 CLAUDE.md
+lua-work/src/obj-a8/
+*.map

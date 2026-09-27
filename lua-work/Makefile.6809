@@ -1,24 +1,59 @@
 # Makefile for Lua 5.1.5 on MC6809
 # Used by nix flake to build the VM
+#
+#   make               lua.s19     emulator layout (code at $0000, output at $F7F0)
+#   make TARGET=a8     lua-a8.s19  Anachron8 layout (code at $1000; see
+#                                  config/memory_layout.py)
 
 CC ?= m6809-unknown-none-gcc
 CFLAGS += -DLUA_USE_6809 -DLUA_CORE -Os
+TARGET ?= sim
 
 # Excluded: lparser, llex, lcode, ldump (stubs in lua6809.c for bytecode-only mode)
 SRCS = lapi.c ldebug.c ldo.c lfunc.c lgc.c lmem.c lobject.c lopcodes.c \
        lstate.c lstring.c ltable.c ltm.c lundump.c lvm.c lzio.c lauxlib.c lua6809.c
 
-OBJS = $(SRCS:.c=.o)
+ifeq ($(TARGET),a8)
+CFLAGS += -DLUA_A8 -DLUA_SLIM
+LDFLAGS += -Wl,-Ttext,0x1000 -Wl,--map=lua-a8.map
+OUT = lua-a8.s19
+OBJDIR = obj-a8
+ASRCS = a8heap.s
+else
+OUT = lua.s19
+OBJDIR = .
+ASRCS =
+endif
+
+OBJS = $(addprefix $(OBJDIR)/,$(SRCS:.c=.o) $(ASRCS:.s=.o))
 
 .PHONY: all clean
 
-all: lua.s19
+all: $(OUT)
 
-lua.s19: $(OBJS)
+$(OUT): $(OBJS)
 	$(CC) $(LDFLAGS) -o $@ $(OBJS)
+ifeq ($(TARGET),a8)
+	@# a8heap.s starts the heap at s_.noinit+16: .noinit must be the last area
+	@# with contents and at most 16 bytes, or the heap would overlap it.
+	@nb=$$(awk '$$1==".noinit" {print $$2; exit}' lua-a8.map); \
+	awk '$$1 ~ /^\./ && $$4 == "=" {print $$1, $$2, $$3}' lua-a8.map | sort -u | \
+	while read area start len; do \
+	  if [ $$((0x$$len)) -gt 0 ] && [ $$((0x$$start)) -gt $$((0x$$nb)) ]; then \
+	    echo "$$area is placed above .noinit: the heap would overlap it"; exit 1; fi; \
+	  if [ "$$area" = .noinit ] && [ $$((0x$$len)) -gt 16 ]; then \
+	    echo ".noinit is 0x$$len bytes; a8heap.s allows 16"; exit 1; fi; \
+	done
+endif
 
-%.o: %.c
+$(OBJDIR)/%.o: %.c
+	@mkdir -p $(OBJDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+$(OBJDIR)/%.o: %.s
+	@mkdir -p $(OBJDIR)
+	$(CC) -c $< -o $@
+
 clean:
-	rm -f $(OBJS) lua.s19
+	rm -f *.o lua.s19 lua-a8.s19 lua-a8.map
+	rm -rf obj-a8

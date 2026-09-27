@@ -63,6 +63,15 @@
             };
           };
 
+          # Same VM for the Anachron8 memory map (code at $1000, I/O at $0000,
+          # MON09 ROM at $E000); see config/memory_layout.py.
+          lua6809-vm-a8 = lua6809-vm.overrideAttrs (old: {
+            pname = "lua6809-vm-a8";
+            buildFlags = [ "-C" "src" "TARGET=a8" ];
+            installPhase = "mkdir -p $out && cp src/lua-a8.s19 src/lua-a8.map $out/";
+            meta = old.meta // { description = "Lua 5.1 VM for the Anachron8 6809 computer"; };
+          });
+
           luac6809 = pkgs.writeShellScriptBin "luac6809" ''
             set -e
             OUT="" INPUT=""
@@ -80,7 +89,7 @@
             cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
             [ ! -d lua-work/src ] && { echo "Error: lua-work/src not found"; exit 1; }
             echo "Creating patch from lua-work/..."
-            diff -ruN "${luaOriginal}/src" lua-work/src \
+            diff -ruN -x obj-a8 -x '*.o' -x '*.s19' -x '*.map' "${luaOriginal}/src" lua-work/src \
               | sed "s|${luaOriginal}/src|a/src|g; s|lua-work/src|b/src|g" \
               > patches/6809-phase1.patch
             echo "" >> patches/6809-phase1.patch
@@ -118,7 +127,7 @@
 
         in {
           inherit pkgs pkgsUnstable luaOriginal luaSrc luac-int32 lua6809-vm
-                  luac6809 regen-patch mc6809 pythonEnv toolchain;
+                  lua6809-vm-a8 luac6809 regen-patch mc6809 pythonEnv toolchain;
         };
 
       # Cache perSystem results to avoid redundant evaluation
@@ -130,24 +139,33 @@
           default = s.lua6809-vm;
           lua-original = s.luaOriginal;
           vm = s.lua6809-vm;
+          vm-a8 = s.lua6809-vm-a8;
           luac = s.luac6809;
         });
 
       apps = forAllSystems (system:
         let
           s = cached.${system};
-          testScript = s.pkgs.writeShellScriptBin "lua6809-test" ''
-            export LUA6809_S19="${s.lua6809-vm}/lua.s19"
+          mkTest = name: vm: target: s.pkgs.writeShellScriptBin name ''
+            export LUA6809_S19="${vm}"
+            export LUA6809_TARGET="${target}"
             export PYTHONPATH="${s.pythonEnv}/${s.pythonEnv.sitePackages}:$PYTHONPATH"
             export PATH="${s.luac6809}/bin:$PATH"
             cd ${./.}
             ${s.pythonEnv}/bin/python3 ./run_tests.py "$@"
           '';
+          testScript = mkTest "lua6809-test" "${s.lua6809-vm}/lua.s19" "sim";
+          testA8Script = mkTest "lua6809-test-a8" "${s.lua6809-vm-a8}/lua-a8.s19" "anachron8";
         in {
           test = {
             type = "app";
             program = "${testScript}/bin/lua6809-test";
             meta.description = "Run Lua 6809 test suite";
+          };
+          test-a8 = {
+            type = "app";
+            program = "${testA8Script}/bin/lua6809-test-a8";
+            meta.description = "Run the test suite on the Anachron8 build and memory model";
           };
         });
 

@@ -53,6 +53,7 @@ static int currentline (lua_State *L, CallInfo *ci) {
 /*
 ** this function can be called asynchronous (e.g. during a signal)
 */
+#ifndef LUA_SLIM
 LUA_API int lua_sethook (lua_State *L, lua_Hook func, int mask, int count) {
   if (func == NULL || mask == 0) {  /* turn off hooks? */
     mask = 0;
@@ -64,21 +65,28 @@ LUA_API int lua_sethook (lua_State *L, lua_Hook func, int mask, int count) {
   L->hookmask = cast_byte(mask);
   return 1;
 }
+#endif
 
 
+#ifndef LUA_SLIM
 LUA_API lua_Hook lua_gethook (lua_State *L) {
   return L->hook;
 }
+#endif
 
 
+#ifndef LUA_SLIM
 LUA_API int lua_gethookmask (lua_State *L) {
   return L->hookmask;
 }
+#endif
 
 
+#ifndef LUA_SLIM
 LUA_API int lua_gethookcount (lua_State *L) {
   return L->basehookcount;
 }
+#endif
 
 
 LUA_API int lua_getstack (lua_State *L, int level, lua_Debug *ar) {
@@ -124,6 +132,7 @@ static const char *findlocal (lua_State *L, CallInfo *ci, int n) {
 }
 
 
+#ifndef LUA_SLIM
 LUA_API const char *lua_getlocal (lua_State *L, const lua_Debug *ar, int n) {
   CallInfo *ci = L->base_ci + ar->i_ci;
   const char *name = findlocal(L, ci, n);
@@ -133,8 +142,10 @@ LUA_API const char *lua_getlocal (lua_State *L, const lua_Debug *ar, int n) {
   lua_unlock(L);
   return name;
 }
+#endif
 
 
+#ifndef LUA_SLIM
 LUA_API const char *lua_setlocal (lua_State *L, const lua_Debug *ar, int n) {
   CallInfo *ci = L->base_ci + ar->i_ci;
   const char *name = findlocal(L, ci, n);
@@ -145,6 +156,7 @@ LUA_API const char *lua_setlocal (lua_State *L, const lua_Debug *ar, int n) {
   lua_unlock(L);
   return name;
 }
+#endif
 
 
 static void funcinfo (lua_Debug *ar, Closure *cl) {

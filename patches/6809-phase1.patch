@@ -1,6 +1,699 @@
-diff -ruN a/src/ldo.c b/src/ldo.c
+diff -ruN -x obj-a8 -x '*.o' -x '*.s19' -x '*.map' a/src/a8heap.s b/src/a8heap.s
+--- a/src/a8heap.s	1969-12-31 19:00:00.000000000 -0500
++++ b/src/a8heap.s	2026-09-26 20:50:24.630529559 -0400
+@@ -0,0 +1,9 @@
++; a8heap.s - start of the heap for the Anachron8 build.
++; .noinit is the last area the linker places (after .bss); the heap begins
++; just past it. Its only content is crt0's saved stack pointer (2 bytes).
++	.module	a8heap
++	.globl	s_.noinit
++	.globl	_a8_heap_start
++	.area	.data
++_a8_heap_start:
++	.word	s_.noinit+16
+diff -ruN -x obj-a8 -x '*.o' -x '*.s19' -x '*.map' a/src/lapi.c b/src/lapi.c
+--- a/src/lapi.c	1969-12-31 19:00:01.000000000 -0500
++++ b/src/lapi.c	2026-09-26 20:52:59.334493507 -0400
+@@ -107,6 +107,7 @@
+ }
+ 
+ 
++#ifndef LUA_SLIM
+ LUA_API void lua_xmove (lua_State *from, lua_State *to, int n) {
+   int i;
+   if (from == to) return;
+@@ -120,11 +121,14 @@
+   }
+   lua_unlock(to);
+ }
++#endif
+ 
+ 
++#ifndef LUA_SLIM
+ LUA_API void lua_setlevel (lua_State *from, lua_State *to) {
+   to->nCcalls = from->nCcalls;
+ }
++#endif
+ 
+ 
+ LUA_API lua_CFunction lua_atpanic (lua_State *L, lua_CFunction panicf) {
+@@ -137,6 +141,7 @@
+ }
+ 
+ 
++#ifndef LUA_SLIM
+ LUA_API lua_State *lua_newthread (lua_State *L) {
+   lua_State *L1;
+   lua_lock(L);
+@@ -148,6 +153,7 @@
+   luai_userstatethread(L, L1);
+   return L1;
+ }
++#endif
+ 
+ 
+ 
+@@ -200,6 +206,7 @@
+ }
+ 
+ 
++#ifndef LUA_SLIM
+ LUA_API void lua_replace (lua_State *L, int idx) {
+   StkId o;
+   lua_lock(L);
+@@ -223,6 +230,7 @@
+   L->top--;
+   lua_unlock(L);
+ }
++#endif
+ 
+ 
+ LUA_API void lua_pushvalue (lua_State *L, int idx) {
+@@ -251,10 +259,12 @@
+ }
+ 
+ 
++#ifndef LUA_SLIM
+ LUA_API int lua_iscfunction (lua_State *L, int idx) {
+   StkId o = index2adr(L, idx);
+   return iscfunction(o);
+ }
++#endif
+ 
+ 
+ LUA_API int lua_isnumber (lua_State *L, int idx) {
+@@ -270,10 +280,12 @@
+ }
+ 
+ 
++#ifndef LUA_SLIM
+ LUA_API int lua_isuserdata (lua_State *L, int idx) {
+   const TValue *o = index2adr(L, idx);
+   return (ttisuserdata(o) || ttislightuserdata(o));
+ }
++#endif
+ 
+ 
+ LUA_API int lua_rawequal (lua_State *L, int index1, int index2) {
+@@ -284,6 +296,7 @@
+ }
+ 
+ 
++#ifndef LUA_SLIM
+ LUA_API int lua_equal (lua_State *L, int index1, int index2) {
+   StkId o1, o2;
+   int i;
+@@ -294,8 +307,10 @@
+   lua_unlock(L);
+   return i;
+ }
++#endif
+ 
+ 
++#ifndef LUA_SLIM
+ LUA_API int lua_lessthan (lua_State *L, int index1, int index2) {
+   StkId o1, o2;
+   int i;
+@@ -307,6 +322,7 @@
+   lua_unlock(L);
+   return i;
+ }
++#endif
+ 
+ 
+ 
+@@ -376,10 +392,12 @@
+ }
+ 
+ 
++#ifndef LUA_SLIM
+ LUA_API lua_CFunction lua_tocfunction (lua_State *L, int idx) {
+   StkId o = index2adr(L, idx);
+   return (!iscfunction(o)) ? NULL : clvalue(o)->c.f;
+ }
++#endif
+ 
+ 
+ LUA_API void *lua_touserdata (lua_State *L, int idx) {
+@@ -392,12 +410,15 @@
+ }
+ 
+ 
++#ifndef LUA_SLIM
+ LUA_API lua_State *lua_tothread (lua_State *L, int idx) {
+   StkId o = index2adr(L, idx);
+   return (!ttisthread(o)) ? NULL : thvalue(o);
+ }
++#endif
+ 
+ 
++#ifndef LUA_SLIM
+ LUA_API const void *lua_topointer (lua_State *L, int idx) {
+   StkId o = index2adr(L, idx);
+   switch (ttype(o)) {
+@@ -410,6 +431,7 @@
+     default: return NULL;
+   }
+ }
++#endif
+ 
+ 
+ 
+@@ -426,12 +448,14 @@
+ }
+ 
+ 
++#ifndef LUA_SLIM
+ LUA_API void lua_pushnumber (lua_State *L, lua_Number n) {
+   lua_lock(L);
+   setnvalue(L->top, n);
+   api_incr_top(L);
+   lua_unlock(L);
+ }
++#endif
+ 
+ 
+ LUA_API void lua_pushinteger (lua_State *L, lua_Integer n) {
+@@ -500,22 +524,27 @@
+ }
+ 
+ 
++#ifndef LUA_SLIM
+ LUA_API void lua_pushboolean (lua_State *L, int b) {
+   lua_lock(L);
+   setbvalue(L->top, (b != 0));  /* ensure that true is 1 */
+   api_incr_top(L);
+   lua_unlock(L);
+ }
++#endif
+ 
+ 
++#ifndef LUA_SLIM
+ LUA_API void lua_pushlightuserdata (lua_State *L, void *p) {
+   lua_lock(L);
+   setpvalue(L->top, p);
+   api_incr_top(L);
+   lua_unlock(L);
+ }
++#endif
+ 
+ 
++#ifndef LUA_SLIM
+ LUA_API int lua_pushthread (lua_State *L) {
+   lua_lock(L);
+   setthvalue(L, L->top, L);
+@@ -523,6 +552,7 @@
+   lua_unlock(L);
+   return (G(L)->mainthread == L);
+ }
++#endif
+ 
+ 
+ 
+@@ -531,6 +561,7 @@
+ */
+ 
+ 
++#ifndef LUA_SLIM
+ LUA_API void lua_gettable (lua_State *L, int idx) {
+   StkId t;
+   lua_lock(L);
+@@ -539,6 +570,7 @@
+   luaV_gettable(L, t, L->top - 1, L->top - 1);
+   lua_unlock(L);
+ }
++#endif
+ 
+ 
+ LUA_API void lua_getfield (lua_State *L, int idx, const char *k) {
+@@ -613,6 +645,7 @@
+ }
+ 
+ 
++#ifndef LUA_SLIM
+ LUA_API void lua_getfenv (lua_State *L, int idx) {
+   StkId o;
+   lua_lock(L);
+@@ -635,6 +668,7 @@
+   api_incr_top(L);
+   lua_unlock(L);
+ }
++#endif
+ 
+ 
+ /*
+@@ -668,6 +702,7 @@
+ }
+ 
+ 
++#ifndef LUA_SLIM
+ LUA_API void lua_rawset (lua_State *L, int idx) {
+   StkId t;
+   lua_lock(L);
+@@ -679,6 +714,7 @@
+   L->top -= 2;
+   lua_unlock(L);
+ }
++#endif
+ 
+ 
+ LUA_API void lua_rawseti (lua_State *L, int idx, int n) {
+@@ -694,6 +730,7 @@
+ }
+ 
+ 
++#ifndef LUA_SLIM
+ LUA_API int lua_setmetatable (lua_State *L, int objindex) {
+   TValue *obj;
+   Table *mt;
+@@ -729,8 +766,10 @@
+   lua_unlock(L);
+   return 1;
+ }
++#endif
+ 
+ 
++#ifndef LUA_SLIM
+ LUA_API int lua_setfenv (lua_State *L, int idx) {
+   StkId o;
+   int res = 1;
+@@ -758,6 +797,7 @@
+   lua_unlock(L);
+   return res;
+ }
++#endif
+ 
+ 
+ /*
+@@ -847,6 +887,7 @@
+ }
+ 
+ 
++#ifndef LUA_SLIM
+ LUA_API int lua_cpcall (lua_State *L, lua_CFunction func, void *ud) {
+   struct CCallS c;
+   int status;
+@@ -857,6 +898,7 @@
+   lua_unlock(L);
+   return status;
+ }
++#endif
+ 
+ 
+ LUA_API int lua_load (lua_State *L, lua_Reader reader, void *data,
+@@ -872,6 +914,7 @@
+ }
+ 
+ 
++#ifndef LUA_SLIM
+ LUA_API int lua_dump (lua_State *L, lua_Writer writer, void *data) {
+   int status;
+   TValue *o;
+@@ -885,17 +928,21 @@
+   lua_unlock(L);
+   return status;
+ }
++#endif
+ 
+ 
++#ifndef LUA_SLIM
+ LUA_API int  lua_status (lua_State *L) {
+   return L->status;
+ }
++#endif
+ 
+ 
+ /*
+ ** Garbage-collection function
+ */
+ 
++#ifndef LUA_SLIM
+ LUA_API int lua_gc (lua_State *L, int what, int data) {
+   int res = 0;
+   global_State *g;
+@@ -953,6 +1000,7 @@
+   lua_unlock(L);
+   return res;
+ }
++#endif
+ 
+ 
+ 
+@@ -970,6 +1018,7 @@
+ }
+ 
+ 
++#ifndef LUA_SLIM
+ LUA_API int lua_next (lua_State *L, int idx) {
+   StkId t;
+   int more;
+@@ -985,6 +1034,7 @@
+   lua_unlock(L);
+   return more;
+ }
++#endif
+ 
+ 
+ LUA_API void lua_concat (lua_State *L, int n) {
+@@ -1004,6 +1054,7 @@
+ }
+ 
+ 
++#ifndef LUA_SLIM
+ LUA_API lua_Alloc lua_getallocf (lua_State *L, void **ud) {
+   lua_Alloc f;
+   lua_lock(L);
+@@ -1012,16 +1063,20 @@
+   lua_unlock(L);
+   return f;
+ }
++#endif
+ 
+ 
++#ifndef LUA_SLIM
+ LUA_API void lua_setallocf (lua_State *L, lua_Alloc f, void *ud) {
+   lua_lock(L);
+   G(L)->ud = ud;
+   G(L)->frealloc = f;
+   lua_unlock(L);
+ }
++#endif
+ 
+ 
++#ifndef LUA_SLIM
+ LUA_API void *lua_newuserdata (lua_State *L, size_t size) {
+   Udata *u;
+   lua_lock(L);
+@@ -1032,6 +1087,7 @@
+   lua_unlock(L);
+   return u + 1;
+ }
++#endif
+ 
+ 
+ 
+@@ -1054,6 +1110,7 @@
+ }
+ 
+ 
++#ifndef LUA_SLIM
+ LUA_API const char *lua_getupvalue (lua_State *L, int funcindex, int n) {
+   const char *name;
+   TValue *val;
+@@ -1066,8 +1123,10 @@
+   lua_unlock(L);
+   return name;
+ }
++#endif
+ 
+ 
++#ifndef LUA_SLIM
+ LUA_API const char *lua_setupvalue (lua_State *L, int funcindex, int n) {
+   const char *name;
+   TValue *val;
+@@ -1084,4 +1143,5 @@
+   lua_unlock(L);
+   return name;
+ }
++#endif
+ 
+diff -ruN -x obj-a8 -x '*.o' -x '*.s19' -x '*.map' a/src/lauxlib.c b/src/lauxlib.c
+--- a/src/lauxlib.c	1969-12-31 19:00:01.000000000 -0500
++++ b/src/lauxlib.c	2026-09-26 20:52:33.128258128 -0400
+@@ -96,6 +96,7 @@
+ /* }====================================================== */
+ 
+ 
++#ifndef LUA_SLIM
+ LUALIB_API int luaL_checkoption (lua_State *L, int narg, const char *def,
+                                  const char *const lst[]) {
+   const char *name = (def) ? luaL_optstring(L, narg, def) :
+@@ -107,8 +108,10 @@
+   return luaL_argerror(L, narg,
+                        lua_pushfstring(L, "invalid option " LUA_QS, name));
+ }
++#endif
+ 
+ 
++#ifndef LUA_SLIM
+ LUALIB_API int luaL_newmetatable (lua_State *L, const char *tname) {
+   lua_getfield(L, LUA_REGISTRYINDEX, tname);  /* get registry.name */
+   if (!lua_isnil(L, -1))  /* name already in use? */
+@@ -119,8 +122,10 @@
+   lua_setfield(L, LUA_REGISTRYINDEX, tname);  /* registry.name = metatable */
+   return 1;
+ }
++#endif
+ 
+ 
++#ifndef LUA_SLIM
+ LUALIB_API void *luaL_checkudata (lua_State *L, int ud, const char *tname) {
+   void *p = lua_touserdata(L, ud);
+   if (p != NULL) {  /* value is a userdata? */
+@@ -135,24 +140,31 @@
+   luaL_typerror(L, ud, tname);  /* else error */
+   return NULL;  /* to avoid warnings */
+ }
++#endif
+ 
+ 
++#ifndef LUA_SLIM
+ LUALIB_API void luaL_checkstack (lua_State *L, int space, const char *mes) {
+   if (!lua_checkstack(L, space))
+     luaL_error(L, "stack overflow (%s)", mes);
+ }
++#endif
+ 
+ 
++#ifndef LUA_SLIM
+ LUALIB_API void luaL_checktype (lua_State *L, int narg, int t) {
+   if (lua_type(L, narg) != t)
+     tag_error(L, narg, t);
+ }
++#endif
+ 
+ 
++#ifndef LUA_SLIM
+ LUALIB_API void luaL_checkany (lua_State *L, int narg) {
+   if (lua_type(L, narg) == LUA_TNONE)
+     luaL_argerror(L, narg, "value expected");
+ }
++#endif
+ 
+ 
+ LUALIB_API const char *luaL_checklstring (lua_State *L, int narg, size_t *len) {
+@@ -181,9 +193,11 @@
+ }
+ 
+ 
++#ifndef LUA_SLIM
+ LUALIB_API lua_Number luaL_optnumber (lua_State *L, int narg, lua_Number def) {
+   return luaL_opt(L, luaL_checknumber, narg, def);
+ }
++#endif
+ 
+ 
+ LUALIB_API lua_Integer luaL_checkinteger (lua_State *L, int narg) {
+@@ -194,10 +208,12 @@
+ }
+ 
+ 
++#ifndef LUA_SLIM
+ LUALIB_API lua_Integer luaL_optinteger (lua_State *L, int narg,
+                                                       lua_Integer def) {
+   return luaL_opt(L, luaL_checkinteger, narg, def);
+ }
++#endif
+ 
+ 
+ LUALIB_API int luaL_getmetafield (lua_State *L, int obj, const char *event) {
+@@ -216,6 +232,7 @@
+ }
+ 
+ 
++#ifndef LUA_SLIM
+ LUALIB_API int luaL_callmeta (lua_State *L, int obj, const char *event) {
+   obj = abs_index(L, obj);
+   if (!luaL_getmetafield(L, obj, event))  /* no metafield? */
+@@ -224,12 +241,15 @@
+   lua_call(L, 1, 1);
+   return 1;
+ }
++#endif
+ 
+ 
++#ifndef LUA_SLIM
+ LUALIB_API void (luaL_register) (lua_State *L, const char *libname,
+                                 const luaL_Reg *l) {
+   luaI_openlib(L, libname, l, 0);
+ }
++#endif
+ 
+ 
+ static int libsize (const luaL_Reg *l) {
+@@ -337,6 +357,7 @@
+ 
+ 
+ 
++#ifndef LUA_SLIM
+ LUALIB_API const char *luaL_gsub (lua_State *L, const char *s, const char *p,
+                                                                const char *r) {
+   const char *wild;
+@@ -352,6 +373,7 @@
+   luaL_pushresult(&b);
+   return lua_tostring(L, -1);
+ }
++#endif
+ 
+ 
+ LUALIB_API const char *luaL_findtable (lua_State *L, int idx,
+@@ -451,6 +473,7 @@
+ }
+ 
+ 
++#ifndef LUA_SLIM
+ LUALIB_API void luaL_addvalue (luaL_Buffer *B) {
+   lua_State *L = B->L;
+   size_t vl;
+@@ -467,17 +490,21 @@
+     adjuststack(B);
+   }
+ }
++#endif
+ 
+ 
++#ifndef LUA_SLIM
+ LUALIB_API void luaL_buffinit (lua_State *L, luaL_Buffer *B) {
+   B->L = L;
+   B->p = B->buffer;
+   B->lvl = 0;
+ }
++#endif
+ 
+ /* }====================================================== */
+ 
+ 
++#ifndef LUA_SLIM
+ LUALIB_API int luaL_ref (lua_State *L, int t) {
+   int ref;
+   t = abs_index(L, t);
+@@ -499,8 +526,10 @@
+   lua_rawseti(L, t, ref);
+   return ref;
+ }
++#endif
+ 
+ 
++#ifndef LUA_SLIM
+ LUALIB_API void luaL_unref (lua_State *L, int t, int ref) {
+   if (ref >= 0) {
+     t = abs_index(L, t);
+@@ -510,6 +539,7 @@
+     lua_rawseti(L, t, FREELIST_REF);  /* t[FREELIST_REF] = ref */
+   }
+ }
++#endif
+ 
+ 
+ 
+@@ -549,6 +579,7 @@
+ }
+ 
+ 
++#ifndef LUA_SLIM
+ LUALIB_API int luaL_loadfile (lua_State *L, const char *filename) {
+   LoadF lf;
+   int status, readstatus;
+@@ -588,6 +619,7 @@
+   lua_remove(L, fnameindex);
+   return status;
+ }
++#endif
+ 
+ 
+ typedef struct LoadS {
+@@ -615,9 +647,11 @@
+ }
+ 
+ 
++#ifndef LUA_SLIM
+ LUALIB_API int (luaL_loadstring) (lua_State *L, const char *s) {
+   return luaL_loadbuffer(L, s, strlen(s), s);
+ }
++#endif
+ 
+ 
+ 
+diff -ruN -x obj-a8 -x '*.o' -x '*.s19' -x '*.map' a/src/ldebug.c b/src/ldebug.c
+--- a/src/ldebug.c	1969-12-31 19:00:01.000000000 -0500
++++ b/src/ldebug.c	2026-09-26 20:52:33.129058283 -0400
+@@ -53,6 +53,7 @@
+ /*
+ ** this function can be called asynchronous (e.g. during a signal)
+ */
++#ifndef LUA_SLIM
+ LUA_API int lua_sethook (lua_State *L, lua_Hook func, int mask, int count) {
+   if (func == NULL || mask == 0) {  /* turn off hooks? */
+     mask = 0;
+@@ -64,21 +65,28 @@
+   L->hookmask = cast_byte(mask);
+   return 1;
+ }
++#endif
+ 
+ 
++#ifndef LUA_SLIM
+ LUA_API lua_Hook lua_gethook (lua_State *L) {
+   return L->hook;
+ }
++#endif
+ 
+ 
++#ifndef LUA_SLIM
+ LUA_API int lua_gethookmask (lua_State *L) {
+   return L->hookmask;
+ }
++#endif
+ 
+ 
++#ifndef LUA_SLIM
+ LUA_API int lua_gethookcount (lua_State *L) {
+   return L->basehookcount;
+ }
++#endif
+ 
+ 
+ LUA_API int lua_getstack (lua_State *L, int level, lua_Debug *ar) {
+@@ -124,6 +132,7 @@
+ }
+ 
+ 
++#ifndef LUA_SLIM
+ LUA_API const char *lua_getlocal (lua_State *L, const lua_Debug *ar, int n) {
+   CallInfo *ci = L->base_ci + ar->i_ci;
+   const char *name = findlocal(L, ci, n);
+@@ -133,8 +142,10 @@
+   lua_unlock(L);
+   return name;
+ }
++#endif
+ 
+ 
++#ifndef LUA_SLIM
+ LUA_API const char *lua_setlocal (lua_State *L, const lua_Debug *ar, int n) {
+   CallInfo *ci = L->base_ci + ar->i_ci;
+   const char *name = findlocal(L, ci, n);
+@@ -145,6 +156,7 @@
+   lua_unlock(L);
+   return name;
+ }
++#endif
+ 
+ 
+ static void funcinfo (lua_Debug *ar, Closure *cl) {
+diff -ruN -x obj-a8 -x '*.o' -x '*.s19' -x '*.map' a/src/ldo.c b/src/ldo.c
 --- a/src/ldo.c	1969-12-31 19:00:01.000000000 -0500
-+++ b/src/ldo.c	2025-12-30 15:54:03.009122462 -0500
++++ b/src/ldo.c	2026-09-26 20:52:33.129826606 -0400
 @@ -110,11 +110,14 @@
  
  int luaD_rawrunprotected (lua_State *L, Pfunc f, void *ud) {
@@ -17,9 +710,36 @@ diff -ruN a/src/ldo.c b/src/ldo.c
    );
    L->errorJmp = lj.previous;  /* restore old error handler */
    return lj.status;
-diff -ruN a/src/lmem.c b/src/lmem.c
+@@ -415,6 +418,7 @@
+ }
+ 
+ 
++#ifndef LUA_SLIM
+ LUA_API int lua_resume (lua_State *L, int nargs) {
+   int status;
+   lua_lock(L);
+@@ -439,8 +443,10 @@
+   lua_unlock(L);
+   return status;
+ }
++#endif
+ 
+ 
++#ifndef LUA_SLIM
+ LUA_API int lua_yield (lua_State *L, int nresults) {
+   luai_userstateyield(L, nresults);
+   lua_lock(L);
+@@ -451,6 +457,7 @@
+   lua_unlock(L);
+   return -1;
+ }
++#endif
+ 
+ 
+ int luaD_pcall (lua_State *L, Pfunc func, void *u,
+diff -ruN -x obj-a8 -x '*.o' -x '*.s19' -x '*.map' a/src/lmem.c b/src/lmem.c
 --- a/src/lmem.c	1969-12-31 19:00:01.000000000 -0500
-+++ b/src/lmem.c	2025-12-29 16:19:05.124960006 -0500
++++ b/src/lmem.c	2026-09-26 20:26:13.648523341 -0400
 @@ -75,8 +75,11 @@
  */
  void *luaM_realloc_ (lua_State *L, void *block, size_t osize, size_t nsize) {
@@ -33,9 +753,9 @@ diff -ruN a/src/lmem.c b/src/lmem.c
    if (block == NULL && nsize > 0)
      luaD_throw(L, LUA_ERRMEM);
    lua_assert((nsize == 0) == (block == NULL));
-diff -ruN a/src/lstate.c b/src/lstate.c
+diff -ruN -x obj-a8 -x '*.o' -x '*.s19' -x '*.map' a/src/lstate.c b/src/lstate.c
 --- a/src/lstate.c	1969-12-31 19:00:01.000000000 -0500
-+++ b/src/lstate.c	2025-12-31 11:17:51.849100050 -0500
++++ b/src/lstate.c	2026-09-26 20:26:13.652633465 -0400
 @@ -144,7 +144,11 @@
    int i;
    lua_State *L;
@@ -73,9 +793,9 @@ diff -ruN a/src/lstate.c b/src/lstate.c
    return L;
  }
  
-diff -ruN a/src/lua.h b/src/lua.h
+diff -ruN -x obj-a8 -x '*.o' -x '*.s19' -x '*.map' a/src/lua.h b/src/lua.h
 --- a/src/lua.h	1969-12-31 19:00:01.000000000 -0500
-+++ b/src/lua.h	2025-12-28 23:41:15.418429588 -0500
++++ b/src/lua.h	2026-09-26 20:26:13.655078482 -0400
 @@ -84,7 +84,7 @@
  
  
@@ -85,10 +805,10 @@ diff -ruN a/src/lua.h b/src/lua.h
  
  
  /*
-diff -ruN a/src/lua6809.c b/src/lua6809.c
+diff -ruN -x obj-a8 -x '*.o' -x '*.s19' -x '*.map' a/src/lua6809.c b/src/lua6809.c
 --- a/src/lua6809.c	1969-12-31 19:00:00.000000000 -0500
-+++ b/src/lua6809.c	2025-12-31 10:07:11.214348775 -0500
-@@ -0,0 +1,345 @@
++++ b/src/lua6809.c	2026-09-26 21:05:17.544227898 -0400
+@@ -0,0 +1,432 @@
 +/*
 +** 6809-specific stubs and implementations for Lua
 +*/
@@ -104,7 +824,9 @@ diff -ruN a/src/lua6809.c b/src/lua6809.c
 +** NOTE: Must be OUTSIDE stack range ($F800-$FFF0) to avoid accidental output
 +** when PSHS writes to stack. Using $F7F0 just before stack area.
 +*/
++#ifndef LUA_A8
 +static volatile char * const OUTPUT_ADDR = (volatile char*)0xF7F0;
++#endif
 +
 +/* Integer power function for luai_numpow */
 +long luai_ipow(long base, long exp) {
@@ -151,13 +873,26 @@ diff -ruN a/src/lua6809.c b/src/lua6809.c
 + * Code ends at ~$E7AC. Bytecode at $E800. Heap starts after bytecode.
 + * I/O port at $F7F0 (reserved, not in heap or stack).
 + * Stack grows down from $FFF0 to $F800 (~2KB). */
++#ifdef LUA_A8
++/* Anachron8: the heap runs from the end of the program (a8heap.s, from the
++ * linker) up to VRAM at $C000. The stack is MON09's user stack below $DF60. */
++extern char *a8_heap_start;
++#define HEAP_START a8_heap_start
++#define HEAP_END   ((char*)0xC000)
++static char *heap_break;
++#else
 +#define HEAP_START ((char*)0xEB00)
 +#define HEAP_END   ((char*)0xF7F0)
 +
 +static char *heap_break = HEAP_START;
++#endif
 +
 +void *sbrk(int incr) {
-+  char *prev_break = heap_break;
++  char *prev_break;
++#ifdef LUA_A8
++  if (heap_break == NULL) heap_break = HEAP_START;
++#endif
++  prev_break = heap_break;
 +  if (incr == 0) {
 +    return prev_break;
 +  }
@@ -282,13 +1017,80 @@ diff -ruN a/src/lua6809.c b/src/lua6809.c
 +int ungetc(int c, FILE *f) { (void)c; (void)f; return -1; }
 +int __srget_r(struct _reent *r, FILE *f) { (void)r; (void)f; return -1; }
 +
++#ifdef LUA_A8
++/* SWI hands control back to MON09, which shows the registers and prompts.
++ * D tells how the VM ended: $1A8E = normal exit, $DEAD = abort. */
++void abort(void) { for (;;) __asm__ volatile ("ldd\t#0xDEAD\n\tswi"); }
++void exit(int code) { (void)code; for (;;) __asm__ volatile ("ldd\t#0x1A8E\n\tswi"); }
++#else
 +void abort(void) { while(1); }
 +void exit(int code) { (void)code; while(1); }
++#endif
 +int atexit(void (*func)(void)) { (void)func; return 0; }
 +
++#ifdef LUA_A8
++/* Anachron8 console: every character goes to the ACIA (USB serial, what
++ * MON09 uses) and to an 80x25 text screen in VRAM. */
++#define ACIA_DATA  (*(volatile unsigned char *)0x0000)
++#define ACIA_STAT  (*(volatile unsigned char *)0x0001)
++#define ACIA_TDRE  0x10
++#define VRAM       ((volatile unsigned char *)0xC000)
++#define VRAM_ATTR  (VRAM + 2000)
++#define CURSOR_X   (VRAM[4000])
++#define CURSOR_Y   (VRAM[4001])
++#define COLS       80
++#define ROWS       25
++#define TEXT_ATTR  0x07   /* light grey on black */
++
++static unsigned char scr_x, scr_y, scr_ready;
++
++static void acia_putc(char c) {
++  while (!(ACIA_STAT & ACIA_TDRE))
++    ;
++  ACIA_DATA = c;
++}
++
++static void screen_init(void) {
++  int i;
++  for (i = 0; i < COLS * ROWS; i++) {
++    VRAM[i] = ' ';
++    VRAM_ATTR[i] = TEXT_ATTR;
++  }
++  scr_x = scr_y = 0;
++  scr_ready = 1;
++}
++
++static void screen_putc(char c) {
++  int i;
++  if (!scr_ready) screen_init();
++  if (c == '\n') {
++    scr_x = 0;
++    scr_y++;
++  } else if ((unsigned char)c < ' ') {
++    return;  /* other control characters don't reach the screen */
++  } else {
++    VRAM[scr_y * COLS + scr_x] = c;
++    if (++scr_x == COLS) { scr_x = 0; scr_y++; }
++  }
++  if (scr_y == ROWS) {
++    for (i = 0; i < COLS * (ROWS - 1); i++) VRAM[i] = VRAM[i + COLS];
++    for (; i < COLS * ROWS; i++) VRAM[i] = ' ';
++    scr_y = ROWS - 1;
++  }
++  CURSOR_X = scr_x;
++  CURSOR_Y = scr_y;
++}
++
++static void emit_char(char c) {
++  if (c == '\n') acia_putc('\r');
++  acia_putc(c);
++  screen_putc(c);
++}
++#else
 +static void emit_char(char c) {
 +  *OUTPUT_ADDR = c;
 +}
++#endif
 +
 +static void emit_string(const char *s) {
 +  while (*s) emit_char(*s++);
@@ -360,8 +1162,13 @@ diff -ruN a/src/lua6809.c b/src/lua6809.c
 +/*
 +** Bytecode loading from memory
 +*/
++#ifdef LUA_A8
++#define BYTECODE_SIZE_ADDR ((volatile unsigned char*)0xD000)
++#define BYTECODE_DATA_ADDR ((const char*)0xD002)
++#else
 +#define BYTECODE_SIZE_ADDR ((volatile unsigned char*)0xE800)
 +#define BYTECODE_DATA_ADDR ((const char*)0xE802)
++#endif
 +
 +static int get_bytecode_size(void) {
 +  return (BYTECODE_SIZE_ADDR[0] << 8) | BYTECODE_SIZE_ADDR[1];
@@ -434,9 +1241,9 @@ diff -ruN a/src/lua6809.c b/src/lua6809.c
 +  lua_close(L);
 +  return 0;
 +}
-diff -ruN a/src/luaconf.h b/src/luaconf.h
+diff -ruN -x obj-a8 -x '*.o' -x '*.s19' -x '*.map' a/src/luaconf.h b/src/luaconf.h
 --- a/src/luaconf.h	1969-12-31 19:00:01.000000000 -0500
-+++ b/src/luaconf.h	2025-12-30 11:21:02.148790569 -0500
++++ b/src/luaconf.h	2026-09-26 20:26:13.655772516 -0400
 @@ -44,6 +44,19 @@
  #define LUA_DL_DYLD		/* does not need extra library */
  #endif
@@ -606,9 +1413,9 @@ diff -ruN a/src/luaconf.h b/src/luaconf.h
  #endif
  
  
-diff -ruN a/src/lzio.c b/src/lzio.c
+diff -ruN -x obj-a8 -x '*.o' -x '*.s19' -x '*.map' a/src/lzio.c b/src/lzio.c
 --- a/src/lzio.c	1969-12-31 19:00:01.000000000 -0500
-+++ b/src/lzio.c	2025-12-29 15:03:16.892226723 -0500
++++ b/src/lzio.c	2026-09-26 20:26:13.656669798 -0400
 @@ -22,8 +22,11 @@
    size_t size;
    lua_State *L = z->L;
@@ -623,30 +1430,65 @@ diff -ruN a/src/lzio.c b/src/lzio.c
    if (buff == NULL || size == 0) return EOZ;
    z->n = size - 1;
 
---- a/Makefile.6809	2025-12-31 11:18:00.450827000 -0500
-+++ b/Makefile.6809	2025-12-30 20:01:37.171700896 -0500
-@@ -0,0 +1,24 @@
+--- a/Makefile.6809	2026-09-26 21:06:26.334751000 -0400
++++ b/Makefile.6809	2026-09-26 21:05:36.892373723 -0400
+@@ -0,0 +1,59 @@
 +# Makefile for Lua 5.1.5 on MC6809
 +# Used by nix flake to build the VM
++#
++#   make               lua.s19     emulator layout (code at $0000, output at $F7F0)
++#   make TARGET=a8     lua-a8.s19  Anachron8 layout (code at $1000; see
++#                                  config/memory_layout.py)
 +
 +CC ?= m6809-unknown-none-gcc
 +CFLAGS += -DLUA_USE_6809 -DLUA_CORE -Os
++TARGET ?= sim
 +
 +# Excluded: lparser, llex, lcode, ldump (stubs in lua6809.c for bytecode-only mode)
 +SRCS = lapi.c ldebug.c ldo.c lfunc.c lgc.c lmem.c lobject.c lopcodes.c \
 +       lstate.c lstring.c ltable.c ltm.c lundump.c lvm.c lzio.c lauxlib.c lua6809.c
 +
-+OBJS = $(SRCS:.c=.o)
++ifeq ($(TARGET),a8)
++CFLAGS += -DLUA_A8 -DLUA_SLIM
++LDFLAGS += -Wl,-Ttext,0x1000 -Wl,--map=lua-a8.map
++OUT = lua-a8.s19
++OBJDIR = obj-a8
++ASRCS = a8heap.s
++else
++OUT = lua.s19
++OBJDIR = .
++ASRCS =
++endif
++
++OBJS = $(addprefix $(OBJDIR)/,$(SRCS:.c=.o) $(ASRCS:.s=.o))
 +
 +.PHONY: all clean
 +
-+all: lua.s19
++all: $(OUT)
 +
-+lua.s19: $(OBJS)
++$(OUT): $(OBJS)
 +	$(CC) $(LDFLAGS) -o $@ $(OBJS)
++ifeq ($(TARGET),a8)
++	@# a8heap.s starts the heap at s_.noinit+16: .noinit must be the last area
++	@# with contents and at most 16 bytes, or the heap would overlap it.
++	@nb=$$(awk '$$1==".noinit" {print $$2; exit}' lua-a8.map); \
++	awk '$$1 ~ /^\./ && $$4 == "=" {print $$1, $$2, $$3}' lua-a8.map | sort -u | \
++	while read area start len; do \
++	  if [ $$((0x$$len)) -gt 0 ] && [ $$((0x$$start)) -gt $$((0x$$nb)) ]; then \
++	    echo "$$area is placed above .noinit: the heap would overlap it"; exit 1; fi; \
++	  if [ "$$area" = .noinit ] && [ $$((0x$$len)) -gt 16 ]; then \
++	    echo ".noinit is 0x$$len bytes; a8heap.s allows 16"; exit 1; fi; \
++	done
++endif
 +
-+%.o: %.c
++$(OBJDIR)/%.o: %.c
++	@mkdir -p $(OBJDIR)
 +	$(CC) $(CFLAGS) -c $< -o $@
 +
++$(OBJDIR)/%.o: %.s
++	@mkdir -p $(OBJDIR)
++	$(CC) -c $< -o $@
++
 +clean:
-+	rm -f $(OBJS) lua.s19
++	rm -f *.o lua.s19 lua-a8.s19 lua-a8.map
++	rm -rf obj-a8
