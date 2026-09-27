@@ -28,7 +28,7 @@ from config.memory_layout import (
 from emu.anachron8 import ROM, BusError, new_memory
 
 SWI_OPCODE = 0x3F
-EXIT_OK, EXIT_ABORT = 0x1A8E, 0xDEAD  # D at the final SWI (lua6809.c exit/abort)
+EXIT_OK, EXIT_ABORT = 0x1A8E, 0xDEAD  # D when lua6809.c exit/abort re-enter MON09
 
 
 def parse_s19(filename):
@@ -79,16 +79,19 @@ def run_test_a8(s19_path, luac_file):
     cpu.set_cc(A8_ENTRY_CC)
     cpu.direct_page.set(0)
 
-    # The VM ends with SWI, which hands control back to MON09 (the emulator
-    # doesn't implement SWI, so stop on it). Only exit()'s SWI with the
-    # EXIT_OK marker in D counts as finishing; anything else is a failure.
+    # The VM ends by jumping through the reset vector back into MON09. Only
+    # arriving at MON09's reset entry with the EXIT_OK marker in D counts as
+    # finishing; any other way into the ROM, or any SWI, is a failure.
+    reset_entry = memory.read_word(0xFFFE)
     try:
         for _ in range(50_000_000):
             pc = cpu.program_counter.value
             if pc >= ROM:
-                return None, f"jumped into the ROM at ${pc:04X}"
-            if memory.read_byte(pc) == SWI_OPCODE:
+                if pc != reset_entry:
+                    return None, f"jumped into the ROM at ${pc:04X}"
                 break
+            if memory.read_byte(pc) == SWI_OPCODE:
+                return None, f"SWI at ${pc:04X} (MON09 would jump to its $DF60 vector)"
             if cpu.system_stack_pointer.value < A8_STACK_BOTTOM:
                 return None, (f"stack overflow: S=${cpu.system_stack_pointer.value:04X} "
                               f"below ${A8_STACK_BOTTOM:04X} at PC ${pc:04X}")
@@ -101,8 +104,8 @@ def run_test_a8(s19_path, luac_file):
         return None, f"CPU error: {e}"
     d = cpu.accu_d.value
     if d != EXIT_OK:
-        why = "abort()" if d == EXIT_ABORT else f"unexpected SWI (D=${d:04X})"
-        return None, f"{why} at PC ${pc:04X}"
+        why = "abort()" if d == EXIT_ABORT else f"reset without exit marker (D=${d:04X})"
+        return None, f"{why}, last instruction at ${cpu.last_op_address:04X}"
 
     output = "".join(memory.console_output)
     # The VRAM screen must show the same text as the serial port.

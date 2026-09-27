@@ -807,8 +807,8 @@ diff -ruN -x obj-a8 -x '*.o' -x '*.s19' -x '*.map' a/src/lua.h b/src/lua.h
  /*
 diff -ruN -x obj-a8 -x '*.o' -x '*.s19' -x '*.map' a/src/lua6809.c b/src/lua6809.c
 --- a/src/lua6809.c	1969-12-31 19:00:00.000000000 -0500
-+++ b/src/lua6809.c	2026-09-26 21:05:17.544227898 -0400
-@@ -0,0 +1,432 @@
++++ b/src/lua6809.c	2026-09-26 21:12:20.712648824 -0400
+@@ -0,0 +1,434 @@
 +/*
 +** 6809-specific stubs and implementations for Lua
 +*/
@@ -1018,10 +1018,12 @@ diff -ruN -x obj-a8 -x '*.o' -x '*.s19' -x '*.map' a/src/lua6809.c b/src/lua6809
 +int __srget_r(struct _reent *r, FILE *f) { (void)r; (void)f; return -1; }
 +
 +#ifdef LUA_A8
-+/* SWI hands control back to MON09, which shows the registers and prompts.
++/* Back to MON09 through the reset vector: it restarts (banner, prompt) with
++ * its own stack. SWI can't be used: MON09 passes a non-breakpoint SWI to its
++ * RAM vector at $DF60, which RESET clears to 0000 (a jump into the ACIA).
 + * D tells how the VM ended: $1A8E = normal exit, $DEAD = abort. */
-+void abort(void) { for (;;) __asm__ volatile ("ldd\t#0xDEAD\n\tswi"); }
-+void exit(int code) { (void)code; for (;;) __asm__ volatile ("ldd\t#0x1A8E\n\tswi"); }
++void abort(void) { __asm__ volatile ("ldd\t#0xDEAD\n\tjmp\t[0xFFFE]"); for (;;); }
++void exit(int code) { (void)code; __asm__ volatile ("ldd\t#0x1A8E\n\tjmp\t[0xFFFE]"); for (;;); }
 +#else
 +void abort(void) { while(1); }
 +void exit(int code) { (void)code; while(1); }
@@ -1430,7 +1432,7 @@ diff -ruN -x obj-a8 -x '*.o' -x '*.s19' -x '*.map' a/src/lzio.c b/src/lzio.c
    if (buff == NULL || size == 0) return EOZ;
    z->n = size - 1;
 
---- a/Makefile.6809	2026-09-26 21:06:26.334751000 -0400
+--- a/Makefile.6809	2026-09-26 21:12:36.291385000 -0400
 +++ b/Makefile.6809	2026-09-26 21:05:36.892373723 -0400
 @@ -0,0 +1,59 @@
 +# Makefile for Lua 5.1.5 on MC6809

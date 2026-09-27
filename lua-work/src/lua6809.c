@@ -207,10 +207,12 @@ int ungetc(int c, FILE *f) { (void)c; (void)f; return -1; }
 int __srget_r(struct _reent *r, FILE *f) { (void)r; (void)f; return -1; }
 
 #ifdef LUA_A8
-/* SWI hands control back to MON09, which shows the registers and prompts.
+/* Back to MON09 through the reset vector: it restarts (banner, prompt) with
+ * its own stack. SWI can't be used: MON09 passes a non-breakpoint SWI to its
+ * RAM vector at $DF60, which RESET clears to 0000 (a jump into the ACIA).
  * D tells how the VM ended: $1A8E = normal exit, $DEAD = abort. */
-void abort(void) { for (;;) __asm__ volatile ("ldd\t#0xDEAD\n\tswi"); }
-void exit(int code) { (void)code; for (;;) __asm__ volatile ("ldd\t#0x1A8E\n\tswi"); }
+void abort(void) { __asm__ volatile ("ldd\t#0xDEAD\n\tjmp\t[0xFFFE]"); for (;;); }
+void exit(int code) { (void)code; __asm__ volatile ("ldd\t#0x1A8E\n\tjmp\t[0xFFFE]"); for (;;); }
 #else
 void abort(void) { while(1); }
 void exit(int code) { (void)code; while(1); }
