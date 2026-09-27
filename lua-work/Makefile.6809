@@ -18,7 +18,7 @@ CFLAGS += -DLUA_A8 -DLUA_SLIM
 LDFLAGS += -Wl,-Ttext,0x1000 -Wl,--map=lua-a8.map
 OUT = lua-a8.s19
 OBJDIR = obj-a8
-ASRCS = a8heap.s
+ASRCS = a8heap.s a8start.s
 else
 OUT = lua.s19
 OBJDIR = .
@@ -44,6 +44,12 @@ ifeq ($(TARGET),a8)
 	  if [ "$$area" = .noinit ] && [ $$((0x$$len)) -gt 16 ]; then \
 	    echo ".noinit is 0x$$len bytes; a8heap.s allows 16"; exit 1; fi; \
 	done
+	@# Start at _a8_start (a8start.s: sets S, then crt0), not crt0's __start:
+	@# aslink takes the start address from crt0's .end, so rewrite the S9 record.
+	@ea=$$(awk '$$2 == "_a8_start" {print $$1; exit}' lua-a8.map); \
+	test -n "$$ea" || { echo "_a8_start not in lua-a8.map"; exit 1; }; \
+	ck=$$(( ~(3 + (0x$$ea >> 8) + (0x$$ea & 255)) & 255 )); \
+	grep -v '^S9' $@ > $@.tmp && printf 'S903%s%02X\n' $$ea $$ck >> $@.tmp && mv $@.tmp $@
 endif
 
 $(OBJDIR)/%.o: %.c

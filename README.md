@@ -82,8 +82,9 @@ A second build places the VM in the [Anachron8](https://git.sherwood.haus/blark/
 | `$D000-$DBFF` | Bytecode (2-byte size, then the bytecode) |
 | below `$DF60` | Stack (MON09's user stack) |
 
-The VM is started with MON09's `G` at its entry point, `__start` (currently `$1007`; the
-S9 record of `lua-a8.s19` and `lua-a8.map` give it), and returns to MON09 when
+The VM starts at `_a8_start` (`a8start.s`: sets S to `$DF60`, then crt0), which the build
+writes into the S9 record of `lua-a8.s19` (also in `lua-a8.map`). Start it with MON09's `G`
+at that address, or through a reset with the SPI loader's vector shadow. It returns to MON09 when
 done by jumping through the reset vector (MON09 restarts and prompts), with `D=$1A8E`
 for a normal exit or `D=$DEAD` for `abort()`. (Not `SWI`: MON09 sends a non-breakpoint
 SWI to its RAM vector at `$DF60`, which is `0000` after reset.)

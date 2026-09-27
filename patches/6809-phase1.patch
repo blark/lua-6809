@@ -11,6 +11,21 @@ diff -ruN -x obj-a8 -x '*.o' -x '*.s19' -x '*.map' a/src/a8heap.s b/src/a8heap.s
 +	.area	.data
 +_a8_heap_start:
 +	.word	s_.noinit+16
+diff -ruN -x obj-a8 -x '*.o' -x '*.s19' -x '*.map' a/src/a8start.s b/src/a8start.s
+--- a/src/a8start.s	1969-12-31 19:00:00.000000000 -0500
++++ b/src/a8start.s	2026-09-26 22:00:28.273716403 -0400
+@@ -0,0 +1,11 @@
++; a8start.s - entry point of the Anachron8 build.
++; MON09's G starts a program with S=$DF60, but a start through a reset (the
++; SPI loader's vector shadow) leaves S undefined, and crt0 uses the S it is
++; given. Set MON09's user stack top here, then run crt0.
++	.module	a8start
++	.globl	__start
++	.globl	_a8_start
++	.area	.text
++_a8_start:
++	lds	#0xDF60
++	jmp	__start
 diff -ruN -x obj-a8 -x '*.o' -x '*.s19' -x '*.map' a/src/lapi.c b/src/lapi.c
 --- a/src/lapi.c	1969-12-31 19:00:01.000000000 -0500
 +++ b/src/lapi.c	2026-09-26 20:52:59.334493507 -0400
@@ -1432,9 +1447,9 @@ diff -ruN -x obj-a8 -x '*.o' -x '*.s19' -x '*.map' a/src/lzio.c b/src/lzio.c
    if (buff == NULL || size == 0) return EOZ;
    z->n = size - 1;
 
---- a/Makefile.6809	2026-09-26 21:12:36.291385000 -0400
-+++ b/Makefile.6809	2026-09-26 21:05:36.892373723 -0400
-@@ -0,0 +1,59 @@
+--- a/Makefile.6809	2026-09-26 22:00:57.381558000 -0400
++++ b/Makefile.6809	2026-09-26 22:00:39.766376717 -0400
+@@ -0,0 +1,65 @@
 +# Makefile for Lua 5.1.5 on MC6809
 +# Used by nix flake to build the VM
 +#
@@ -1455,7 +1470,7 @@ diff -ruN -x obj-a8 -x '*.o' -x '*.s19' -x '*.map' a/src/lzio.c b/src/lzio.c
 +LDFLAGS += -Wl,-Ttext,0x1000 -Wl,--map=lua-a8.map
 +OUT = lua-a8.s19
 +OBJDIR = obj-a8
-+ASRCS = a8heap.s
++ASRCS = a8heap.s a8start.s
 +else
 +OUT = lua.s19
 +OBJDIR = .
@@ -1481,6 +1496,12 @@ diff -ruN -x obj-a8 -x '*.o' -x '*.s19' -x '*.map' a/src/lzio.c b/src/lzio.c
 +	  if [ "$$area" = .noinit ] && [ $$((0x$$len)) -gt 16 ]; then \
 +	    echo ".noinit is 0x$$len bytes; a8heap.s allows 16"; exit 1; fi; \
 +	done
++	@# Start at _a8_start (a8start.s: sets S, then crt0), not crt0's __start:
++	@# aslink takes the start address from crt0's .end, so rewrite the S9 record.
++	@ea=$$(awk '$$2 == "_a8_start" {print $$1; exit}' lua-a8.map); \
++	test -n "$$ea" || { echo "_a8_start not in lua-a8.map"; exit 1; }; \
++	ck=$$(( ~(3 + (0x$$ea >> 8) + (0x$$ea & 255)) & 255 )); \
++	grep -v '^S9' $@ > $@.tmp && printf 'S903%s%02X\n' $$ea $$ck >> $@.tmp && mv $@.tmp $@
 +endif
 +
 +$(OBJDIR)/%.o: %.c
