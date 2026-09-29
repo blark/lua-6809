@@ -14,20 +14,30 @@ fail here instead of on the board.
   $D000-$DF5F  RAM ($DF60-$DFFF: MON09 variables, writes are an error here)
   $E000-$FFFF  ROM (MON09, read-only)
 
-map="v2" gives memory architecture v2 under its reset map (anachron8
-docs/MEMORY-V2-SPEC.md sections 1-5) instead:
+map="v2" gives memory architecture v2 (anachron8 docs/MEMORY-V2-SPEC.md
+sections 1-5) instead, starting from its reset map:
 
-  $0000-$7FFF  RAM (block RAM pages $F8-$FB)
-  $8000-$BFFF  slots 4 and 5: the pages in BANK4/BANK5 ($FF40/$FF41, reset
-               0, 1): SDRAM $00-$F7, block RAM $F8-$FB, screens $FC/$FD,
-               the ROM $FE (read-only), nothing $FF (reads $FF)
-  $C000-$DFFF  screen page $FC: the Classic screen at $C000-$CFFF; writes to
-               the upper half $D000-$DFFF are an error here (free RAM on the
-               board, but it sets the screen's dirty flag; nothing uses it)
-  $E000-$FFFF  ROM page $FE (read-only): code, the constant page $FE00 and
-               the vectors, except the I/O page $FF00-$FFEF
-  $FF00-$FFEF  I/O: the v1 registers at $FF00 + their v1 address
-               (ACIA $FF00/$FF01, BANK4/5 $FF40/$FF41, keyboard $FF46/$FF47)
+  $0000-$FDFF  slots 0-7 of the active task's map (MAP0 $FF80-$FF87, MAP1
+               $FF88-$FF8F, TASK $FFA0 bit 0); reset map F8 F9 FA FB 00 01
+               FC FE: block RAM $0000-$7FFF, SDRAM pages 0 and 1 at
+               $8000/$A000, screen page $FC at $C000, the ROM page $FE at
+               $E000. BANK4/BANK5 ($FF40/$FF41) are the active task's slot
+               4/5 entries. A page is SDRAM $00-$F7, block RAM $F8-$FB,
+               screen $FC/$FD, the ROM $FE (read-only), nothing $FF (reads
+               $FF, writes ignored)
+  $FE00-$FEFF  the constant page: offset $1E00 of page CONSTPG ($FFA2, reset $FE)
+  $FF00-$FFEF  I/O: the v1 registers at $FF00 + their v1 address (ACIA
+               $FF00/$FF01, BANK4/5 $FF40/$FF41, keyboard $FF46/$FF47), the
+               MMU registers above and MMU_CTRL ($FFA1, bit 1 VECRAM)
+  $FFF0-$FFFF  the vectors: offset $1FF0 of VECPG, CONSTPG when VECRAM = 1,
+               else the ROM page $FE (CPU vector fetches read them too)
+
+Writes to the ROM page, or to the upper half ($1000-$1FFF) of screen page $FC
+(free RAM on the board, but it sets the screen's dirty flag; nothing uses it),
+are errors here, through any slot. The storage keeps the reset map's view in
+_mem: page $F8 + n at $2000 * n, page $FC at $C000, the ROM page $FE at $E000
+(offsets $1F00-$1FEF included), so code that peeks _mem under the reset map
+sees the logical addresses.
 """
 
 import array
@@ -52,6 +62,11 @@ IO2_END = 0xFFF0
 SCREEN_HI = 0xD000             # the screen page's upper half (writes: BusError)
 SDRAM_PAGES2 = 0xF8            # $00-$F7
 PG_BRAM, PG_SCREEN0, PG_SCREEN1, PG_ROM, PG_NONE = 0xF8, 0xFC, 0xFD, 0xFE, 0xFF
+RESET_MAP = (0xF8, 0xF9, 0xFA, 0xFB, 0x00, 0x01, 0xFC, 0xFE)
+MAP0, MAP1, TASK, MMU_CTRL, CONSTPG = 0xFF80, 0xFF88, 0xFFA0, 0xFFA1, 0xFFA2
+VECRAM = 0x02                  # MMU_CTRL bit 1
+CONST_PAGE, VECTORS = 0xFE00, 0xFFF0
+ACIA_FREE2 = range(0xFF02, 0xFF04)  # free; MON09's INIT writes them (harmless)
 
 
 class BusError(Exception):
@@ -66,7 +81,12 @@ class Anachron8Memory(Memory64K):
         self.map = map
         self.sdram = bytearray(256 * 8192)
         self.screen1 = bytearray(8192)  # v2: page $FD
-        self.bank = [0, 1]
+        self.bank = [0, 1]                     # v1: BANK4/BANK5
+        self.maps = [list(RESET_MAP), list(RESET_MAP)]   # v2: MAP0, MAP1
+        self.task = 0
+        self.mmu_ctrl = 0
+        self.constpg = PG_ROM
+        self._slots = None                      # v2: (buffer, base) of each active slot
         self.touched = set()  # RAM addresses written (with track_usage)
         if map == "v2" and rom_hex == MON09_HEX:
             rom_hex = None  # MON09 v1 does not run under v2
@@ -122,31 +142,39 @@ class Anachron8Memory(Memory64K):
             return self._mem, ROM | offset
         return None
 
+    def _remap(self):
+        """Cache where each slot of the active map reads from (after a map change)."""
+        self._slots = [self._page(pg, 0) for pg in self.maps[self.task]]
+
+    def _where(self, address):
+        """(page, offset) the CPU reaches at a logical address outside the I/O page."""
+        if address >= VECTORS:
+            return (self.constpg if self.mmu_ctrl & VECRAM else PG_ROM), address & 0x1FFF
+        if address >= CONST_PAGE:
+            return self.constpg, address & 0x1FFF
+        return self.maps[self.task][address >> 13], address & 0x1FFF
+
     def _read_v2(self, address):
+        if address < CONST_PAGE:
+            if self._slots is None:
+                self._remap()
+            where = self._slots[address >> 13]
+            return where[0][where[1] | (address & 0x1FFF)] if where else 0xFF
         if IO2 <= address < IO2_END:
             return self._io_read(address)
-        if 0x8000 <= address < 0xC000:
-            where = self._page(self.bank[(address >> 13) - 4], address & 0x1FFF)
-            return where[0][where[1]] if where else 0xFF
-        return self._mem[address]
+        where = self._page(*self._where(address))
+        return where[0][where[1]] if where else 0xFF
 
     def _write_v2(self, address, value):
         if IO2 <= address < IO2_END:
             return self._io_write(address, value)
-        if address >= ROM:
-            raise BusError(f"write ${value:02X} to ROM at ${address:04X}")
-        if SCREEN_HI <= address < ROM:
-            raise BusError(f"write ${value:02X} to the screen page's upper half at ${address:04X}")
         if self.track_usage:
             self.touched.add(address)
-        if 0x8000 <= address < 0xC000:
-            self._window_write(address, value)
-            return
-        self._mem[address] = value
+        self._store_v2(address, value)
 
-    def _window_write(self, address, value):
-        """A write through slot 4 or 5 (v2), with the checks of a direct one."""
-        page, offset = self.bank[(address >> 13) - 4], address & 0x1FFF
+    def _store_v2(self, address, value):
+        """A CPU write outside the I/O page, checked."""
+        page, offset = self._where(address)
         if page == PG_ROM:
             raise BusError(f"write ${value:02X} to ROM page $FE at ${address:04X}")
         if page == PG_SCREEN0 and offset >= SCREEN_HI - 0xC000:
@@ -155,12 +183,46 @@ class Anachron8Memory(Memory64K):
         if where:
             where[0][where[1]] = value
 
+    def _mmu_read(self, address):
+        """v2 MMU registers, or None."""
+        if MAP0 <= address < MAP1 + 8:
+            return self.maps[(address - MAP0) >> 3][address & 7]
+        if address == TASK:
+            return self.task
+        if address == MMU_CTRL:
+            return self.mmu_ctrl
+        if address == CONSTPG:
+            return self.constpg
+        return None
+
+    def _mmu_write(self, address, value):
+        """v2 MMU registers: True if it was one."""
+        if MAP0 <= address < MAP1 + 8:
+            self.maps[(address - MAP0) >> 3][address & 7] = value
+            self._slots = None
+        elif address == TASK:
+            self.task = value & 1
+            self._slots = None
+        elif address == MMU_CTRL:
+            self.mmu_ctrl = value & VECRAM
+        elif address == CONSTPG:
+            self.constpg = value
+        else:
+            return False
+        return True
+
     # --- I/O -------------------------------------------------------------
     def _io_v1(self, address):
         """The v1 address of an I/O register (v2: $FF00 + the v1 address)."""
         return address - IO2 if self.map == "v2" else address
 
     def _io_read(self, address):
+        if self.map == "v2":
+            value = self._mmu_read(address)
+            if value is not None:
+                return value
+            if address in (IO2 + MMU_BANK4, IO2 + MMU_BANK5):
+                return self.maps[self.task][4 + address - IO2 - MMU_BANK4]
         address = self._io_v1(address)
         if address == ACIA_DATA:
             return 0x00
@@ -173,6 +235,15 @@ class Anachron8Memory(Memory64K):
         raise BusError(f"read from unmapped I/O ${address + (IO2 if self.map == 'v2' else 0):04X}")
 
     def _io_write(self, address, value):
+        if self.map == "v2":
+            if self._mmu_write(address, value):
+                return
+            if address in (IO2 + MMU_BANK4, IO2 + MMU_BANK5):
+                self.maps[self.task][4 + address - IO2 - MMU_BANK4] = value
+                self._slots = None
+                return
+            if address == IO2 + ACIA_STAT or address in ACIA_FREE2:
+                return          # ACIA reset and command (MON09's INIT): nothing to model
         address = self._io_v1(address)
         if address == ACIA_DATA:
             if value not in (0, 0x0D):
@@ -190,14 +261,22 @@ class Anachron8Memory(Memory64K):
             a = address + i
             if a >= ROM or (a < 0x1000 and self.map == "v1"):
                 raise BusError(f"load into ${a:04X} (not RAM)")
-            if self.map == "v2" and SCREEN_HI <= a:
-                raise BusError(f"load into ${a:04X} (the screen page's upper half)")
-            if 0x8000 <= a < 0xC000 and self.map == "v2":
-                self._window_write(a, b)
+            if self.map == "v2":
+                if SCREEN_HI <= a:
+                    raise BusError(f"load into ${a:04X} (the screen page's upper half)")
+                self._store_v2(a, b)
             elif 0x8000 <= a < 0xC000:
                 self.sdram[self._sdram_index(a)] = b
             else:
                 self._mem[a] = b
+
+    def page_bytes(self, page, offset, n):
+        """n bytes of physical page `page` from `offset` (v2; page $FF reads $FF)."""
+        out = bytearray()
+        for i in range(n):
+            where = self._page(page, offset + i)
+            out.append(where[0][where[1]] if where else 0xFF)
+        return bytes(out)
 
     def screen(self):
         """The VRAM text screen as 25 strings, trailing blanks removed."""
