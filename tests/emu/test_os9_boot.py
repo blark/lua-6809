@@ -180,6 +180,22 @@ def test_os9_t1_serial():
     check_hardware(s)
 
 
+def test_os9_files_on_dd():
+    """Create, copy and delete files on /DD: the image must be as large as its format
+    (the DriveWire server never grows an image, and answers E$Sect past its end)."""
+    if not built():
+        return
+    s = booted()
+    for line in ("echo hello file >/dd/t1", "copy /dd/startup /dd/t2", "makdir /dd/new",
+                 "copy /dd/t2 /dd/new/t3", "list /dd/t1", "dir /dd/new"):
+        run(s, line)
+    text = s.screen_dump()
+    assert "hello file" in text and "t3" in text and "ERROR" not in text, text
+    for line in ("del /dd/new/t3", "del /dd/t1", "del /dd/t2"):
+        run(s, line)
+    check_hardware(s)
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in globals().items() if n.startswith("test_")]
     failed = 0
