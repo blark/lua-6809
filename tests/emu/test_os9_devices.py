@@ -187,6 +187,43 @@ def test_cpu_swi_family_cwai_sync_pshu():
     assert m.cpu.interrupts["irq"] == 1                           # the masked key IRQ not taken
 
 
+def run_code(code, at=0x1000, steps=1, **regs):
+    """Run `steps` instructions of raw machine code at `at` (reset map: block RAM)."""
+    m = Machine(strict=False)
+    for i, b in enumerate(code):
+        m.mem.write_byte(at + i, b)
+    m.cpu.program_counter.set(at)
+    for name, value in regs.items():
+        getattr(m.cpu, name).set(value)
+    for _ in range(steps):
+        m.cpu.step()
+    return m
+
+
+def test_cpu_sex():
+    m = run_code([0x1D], accu_a=0x55, accu_b=0x80)                 # SEX, B negative
+    assert m.cpu.accu_d.value == 0xFF80 and m.cpu.N and not m.cpu.Z
+    m = run_code([0x1D], accu_a=0x55, accu_b=0x00)
+    assert m.cpu.accu_d.value == 0x0000 and m.cpu.Z and not m.cpu.N
+
+
+def test_cpu_16bit_wrap():
+    m = run_code([0xA6, 0x01], index_x=0xFFFF)                     # LDA 1,X at X=$FFFF reads $0000
+    m.mem.write_byte(0x0000, 0x11)
+    m.cpu.program_counter.set(0x1000)
+    m.cpu.step()
+    assert m.cpu.accu_a.value == 0x11 and m.cpu.index_x.value == 0xFFFF
+    m = Machine(strict=False)
+    m.mem.write_byte(0x0000, 0x22)
+    assert m.mem.read_word(0xFFFF) >> 8 == m.mem.read_byte(0xFFFF)  # word at $FFFF: $FFFF, $0000
+    assert m.mem.read_word(0xFFFF) & 0xFF == 0x22
+    m.mem.write_word(0xFFFF, 0x1234)                                # (ROM byte ignored, $0000 stored)
+    assert m.mem.read_byte(0x0000) == 0x34
+    m.cpu.program_counter.set(0xFFFF)                               # an opcode fetch at $FFFF
+    m.cpu.read_pc_byte()
+    assert m.cpu.program_counter.value == 0x0000
+
+
 def test_trace_ring_buffer():
     m = machine("tick")
     m.cpu.enable_trace(8)

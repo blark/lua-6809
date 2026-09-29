@@ -159,6 +159,15 @@ class Anachron8Memory(Memory64K):
         else:
             self._mem[address] = value
 
+    # The package's word accesses read and write address + 1 unmasked, so a
+    # word at $FFFF missed $0000 (the 6809 wraps). No word callbacks here.
+    def read_word(self, address):
+        return self.read_byte(address) << 8 | self.read_byte((address + 1) & 0xFFFF)
+
+    def write_word(self, address, word):
+        self.write_byte(address, word >> 8)
+        self.write_byte((address + 1) & 0xFFFF, word & 0xFF)
+
     # --- map v2 ------------------------------------------------------------
     def _page(self, page, offset):
         """(buffer, index) of a physical page's byte, or None for page $FF."""

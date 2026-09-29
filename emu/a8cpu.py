@@ -4,9 +4,11 @@ The MC6809 package's CPU with what it lacks for an operating system.
 MC6809 0.6/0.9 (DragonPy's core) leaves SWI, SWI2, SWI3 and SYNC raising
 NotImplementedError, makes CWAI a no-op (not even the AND), has an irq()
 that neither sets E nor I (it pushes only PC and CC unless E happened to be
-set) and no FIRQ or NMI, and pushes or pulls U instead of S for bit 6 of
-PSHU/PULU. A8CPU fixes those and adds interrupt lines sampled before every
-instruction:
+set) and no FIRQ or NMI, pushes or pulls U instead of S for bit 6 of
+PSHU/PULU, leaves A unchanged in SEX when B is negative, and does not wrap
+the 5-bit indexed form (n,R) or the PC at 16 bits (word accesses at $FFFF
+are fixed in the memory model). A8CPU fixes those and adds interrupt lines
+sampled before every instruction:
 
   irq_source   callable, True while the IRQ line is asserted (level)
   firq_line    bool, the FIRQ line (level)
@@ -139,19 +141,27 @@ class A8CPU(CPU):
 
     def _trace_entry(self):
         m = self.memory
-        return (self.cycles, getattr(m, "task", 0), self.program_counter.value,
+        pc = self.program_counter.value
+        # the physical page of the PC (map v2), so the code bytes can be shown after a remap
+        page = m._where(pc)[0] if getattr(m, "map", None) == "v2" and pc < 0xFF00 else None
+        return (self.cycles, getattr(m, "task", 0), page, pc,
                 self.accu_a.value, self.accu_b.value, self.index_x.value, self.index_y.value,
                 self.user_stack_pointer.value, self.system_stack_pointer.value,
                 self.direct_page.value, self.get_cc_value())
 
     def format_trace(self):
         lines = []
-        for cyc, task, pc, a, b, x, y, u, s, dp, cc in self.trace or ():
+        for cyc, task, page, pc, a, b, x, y, u, s, dp, cc in self.trace or ():
             try:
-                code = " ".join(f"{self.memory.read_byte((pc + i) & 0xFFFF):02X}" for i in range(4))
+                if page is None:
+                    code = bytes(self.memory.read_byte((pc + i) & 0xFFFF) for i in range(4))
+                else:
+                    code = self.memory.page_bytes(page, pc & 0x1FFF, 4)
+                code = " ".join(f"{c:02X}" for c in code)
             except Exception:   # an I/O address with side effects or a bus error
                 code = "?? ?? ?? ??"
-            lines.append(f"{cyc:>11} t{task} {pc:04X}: {code}  A={a:02X} B={b:02X} X={x:04X} "
+            where = f"{page:02X}" if page is not None else "--"
+            lines.append(f"{cyc:>11} t{task} {where}:{pc:04X}: {code}  A={a:02X} B={b:02X} X={x:04X} "
                          f"Y={y:04X} U={u:04X} S={s:04X} DP={dp:02X} CC={cc:02X}")
         return "\n".join(lines)
 
@@ -180,6 +190,27 @@ class A8CPU(CPU):
     @opcode(0x13)  # SYNC (inherent)
     def instruction_SYNC(self, opcode):
         self.waiting = "sync"
+
+    # --- 16-bit wrap the package misses -----------------------------------------------
+    def get_ea_indexed(self):
+        """The 5-bit offset form (n,R) returned R + n unmasked: 1,X at X=$FFFF gave $10000."""
+        return super().get_ea_indexed() & 0xFFFF
+
+    def read_pc_byte(self):
+        pc = self.program_counter.value
+        self.program_counter.value = (pc + 1) & 0xFFFF
+        return pc, self.memory.read_byte(pc)
+
+    def read_pc_word(self):
+        pc = self.program_counter.value
+        self.program_counter.value = (pc + 2) & 0xFFFF
+        return pc, self.memory.read_word(pc)
+
+    @opcode(0x1d)  # SEX: A = $FF when B is negative (the package leaves A unchanged then)
+    def instruction_SEX(self, opcode):
+        self.accu_a.set(0xFF if self.accu_b.value & 0x80 else 0x00)
+        self.clear_NZ()
+        self.update_NZ_16(self.accu_d.value)
 
     def _other_stack(self, register):
         return self.user_stack_pointer if register is self.system_stack_pointer else self.system_stack_pointer
