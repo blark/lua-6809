@@ -18,6 +18,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent.parent))
 
 from emu.a8run import Machine  # noqa: E402
+from emu.anachron8 import BusError  # noqa: E402
 from emu.board import SID_FRAME  # noqa: E402
 from emu.drivewire import (  # noqa: E402
     E_SECT, E_UNIT, E_WRITE, OP_NAMEOBJ_CREATE, OP_NAMEOBJ_MOUNT, OP_READEX, OP_WRITE,
@@ -178,7 +179,13 @@ def test_sid_run_owner_reset():
     io(m, 0xB3, 0x00)                                   # already stopped: no reset
     assert sid.resets == 1 and [v for _, v in sid.log] == [3, 0, 0]
     assert sid.sid1_writes == [(0x18, 0x0F)]
-    assert io(m, 0x3B) == 0 and io(m, 0x20) == 0xFF
+    assert io(m, 0x3B) == 0 and io(m, 0x39) == 0xFF and io(m, 0x20) == 0xFF   # no paddles
+    try:
+        io(m, 0xB4, 0)
+        raise AssertionError("no BusError")
+    except BusError:
+        pass
+    Machine(strict=False).mem.write_byte(0xFFB4, 0)                     # the board ignores it
 
 
 def test_sid_absent():

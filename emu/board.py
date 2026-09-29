@@ -25,7 +25,7 @@ as the 6809 sees them, with no 6502 and no SID sound (sid=True, the default):
 
   $FF20-$FF38 SID1 writes: logged in sid.sid1_writes while the 6809 owns the
               chip, dropped while the 6502 does; reads $FF
-  $FF39-$FF3C POTX, POTY, OSC3, ENV3 (the mirror): read 0
+  $FF39-$FF3C POTX, POTY (no paddles: $FF), OSC3, ENV3 (0: no sound here)
   $FFB0/$FFB1 LADDR_HI/LO (R/W)
   $FFB2       LDATA: stores/reads [LADDR], then LADDR + 1 (the loader space:
               the 6502's 32 KB at $0000-$7FFF, the parameter block at
@@ -44,7 +44,9 @@ ignore writes, strict or not.
 A write to one of the read-only registers is a BusError when strict (the
 board ignores it). push_key() queues a key the way the ESP32 does (False
 when the FIFO is full: the key is dropped). reset() is the CPU reset: the
-tick and both DW FIFOs cleared, the keyboard FIFO and the MMU kept.
+tick and both DW FIFOs cleared, the keyboard FIFO and the MMU kept. It
+does not free the DriveWire server's named-object slots: the ESP32 does that
+only for a reset over SPI; call dw.release_named() for one.
 """
 
 import random
@@ -94,7 +96,7 @@ class SidPlayer:
 
     def read(self, reg, cycles):
         if SID1 <= reg < SID1_END:
-            return 0x00 if SID1_MIRROR <= reg < SID1_MIRROR + 4 else 0xFF
+            return 0x00 if SID1_MIRROR + 2 <= reg < SID1_MIRROR + 4 else 0xFF
         if reg == LADDR_HI:
             return self.laddr >> 8
         if reg == LADDR_LO:
@@ -113,6 +115,9 @@ class SidPlayer:
         return 0xFF
 
     def write(self, reg, value, cycles):
+        """False for a register that takes no writes (SID_STATUS)."""
+        if reg == SID_STATUS:
+            return False
         if SID1 <= reg < SID1_END:
             if not self.ctrl & SID_OWNER and reg < SID1_MIRROR:
                 self.sid1_writes.append((reg - SID1, value))
@@ -134,6 +139,7 @@ class SidPlayer:
             self.ctrl = value & (SID_RUN | SID_OWNER)
         elif reg == SID_SONG:
             self.params[4] = value
+        return True
 
     @property
     def running(self):
@@ -236,8 +242,8 @@ class Anachron8Board(Anachron8Memory):
     def _io_write(self, address, value):
         reg = self._io_v1(address)
         if self._sid_reg(reg) and (self.sid or self.sid_absent):
-            if self.sid:
-                self.sid.write(reg, value, self.cpu.cycles)
+            if self.sid and not self.sid.write(reg, value, self.cpu.cycles) and self.strict:
+                raise BusError(f"write ${value:02X} to read-only register ${address:04X}")
             return
         if reg == DW_DATA:
             if self.dw is None:
