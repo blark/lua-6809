@@ -112,6 +112,17 @@ uv run emu/a8run.py --raw rom.bin@FE --drive 0=nos9.dsk -n 5000000 --trace 64
 uv run tests/emu/test_os9_devices.py
 ```
 
+`emu/os9boot.py` boots the NitrOS-9 Level 2 `anachron8` port
+(~/src/nitros9 `recipes/anachron8/dw`) the way the boot stub's catalog
+type 4 will: it is the stub's reference loader. It reports the D.BtBug
+progress characters, stops at the D.Crash halt loop with the trace, and
+flags DriveWire access to drive 0 and writes to pages $FC-$FF.
+
+```bash
+uv run emu/os9boot.py --cmd dir --cmd mfree   # boot to Shell+, type commands
+uv run tests/emu/test_os9_boot.py             # boot, dir, mfree (about 4 s)
+```
+
 ## Getting Started
 
 Requires [Nix](https://nixos.org/) with flakes enabled.
