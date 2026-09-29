@@ -44,6 +44,12 @@ colours there. super_cell() reads a Super cell of either screen. The storage kee
 _mem: page $F8 + n at $2000 * n, page $FC at $C000, the ROM page $FE at $E000
 (offsets $1F00-$1FEF included), so code that peeks _mem under the reset map
 sees the logical addresses.
+
+strict=False (v2 only) does what the board does instead of raising: a write
+to the ROM page is ignored, a write to a Classic screen's upper half is
+stored (it is RAM), a free I/O address reads $FF and ignores writes. For
+code that probes memory legitimately (NitrOS-9's RAM scan); the default
+stays strict.
 """
 
 import array
@@ -96,8 +102,9 @@ def xterm256():
 
 
 class Anachron8Memory(Memory64K):
-    def __init__(self, cfg, rom_hex=MON09_HEX, map="v1", **kwargs):
+    def __init__(self, cfg, rom_hex=MON09_HEX, map="v1", strict=True, **kwargs):
         super().__init__(cfg, **kwargs)
+        self.strict = strict
         if map not in ("v1", "v2"):
             raise ValueError(f"map must be v1 or v2, not {map!r}")
         self.map = map
@@ -201,9 +208,11 @@ class Anachron8Memory(Memory64K):
         """A CPU write outside the I/O page, checked."""
         page, offset = self._where(address)
         if page == PG_ROM:
+            if not self.strict:
+                return          # the board ignores it: the ROM page is read-only
             raise BusError(f"write ${value:02X} to ROM page $FE at ${address:04X}")
         if page in (PG_SCREEN0, PG_SCREEN1) and offset >= SUPER_HI \
-                and not self.page_bytes(page, FORMAT, 1)[0] & FMT_SUPER:
+                and not self.page_bytes(page, FORMAT, 1)[0] & FMT_SUPER and self.strict:
             raise BusError(f"write ${value:02X} to the upper half of Classic screen ${page:02X} at ${address:04X}")
         where = self._page(page, offset)
         if where:
@@ -285,6 +294,8 @@ class Anachron8Memory(Memory64K):
             return self.bank[address - MMU_BANK4]
         if address in (KBD_STATUS, KBD_DATA):
             return 0x00
+        if self.map == "v2" and not self.strict:
+            return 0xFF         # a free I/O address reads $FF on the board
         raise BusError(f"read from unmapped I/O ${address + (IO2 if self.map == 'v2' else 0):04X}")
 
     def _io_write(self, address, value):
@@ -305,6 +316,8 @@ class Anachron8Memory(Memory64K):
         if address in (MMU_BANK4, MMU_BANK5):
             self.bank[address - MMU_BANK4] = value
             return
+        if self.map == "v2" and not self.strict:
+            return              # and ignores writes
         raise BusError(f"write ${value:02X} to unmapped I/O ${address + (IO2 if self.map == 'v2' else 0):04X}")
 
     # --- loading and inspection -----------------------------------------
