@@ -334,6 +334,41 @@ def test_classic_unaffected():
     check_hardware(s)
 
 
+def test_palette_swatches():
+    """vmode p draws swatches on a Super screen (16 rows of " ii " on BColor = ii, the
+    digits black or white by brightness), notes on a Classic one that the palette colours
+    Super screens only, and lists hex with -v."""
+    if not built():
+        return
+    s = booted()
+    run(s, "vmode r")
+    make_super(s)
+    run(s, "vmode p >/w1")                                   # standard output = /W1, Super
+    text = [bytes(s.peek(SCREEN1, r * 80, 64)).decode("latin-1") for r in range(25)]
+    top = next(r for r, t in enumerate(text) if t.startswith(" 00  01  02 "))
+    assert top + 16 <= 25, s.screen_dump(SCREEN1)
+    pal = xterm256()
+    for row in range(16):
+        r = top + row
+        assert text[r] == "".join(f" {16 * row + i:02X} " for i in range(16)), text[r]
+        bg = s.peek(SCREEN1, 0x17D0 + r * 80, 64)
+        fg = s.peek(SCREEN1, 0x7D0 + r * 80, 64)
+        for i in range(16):
+            n = 16 * row + i
+            red, green, blue = pal[3 * n:3 * n + 3]
+            ink = 0 if (77 * red + 150 * green + 29 * blue) >> 8 >= 0x80 else 15
+            assert list(bg[4 * i:4 * i + 4]) == [n] * 4, (n, list(bg[4 * i:4 * i + 4]))
+            assert list(fg[4 * i:4 * i + 4]) == [ink] * 4, (n, ink, list(fg[4 * i:4 * i + 4]))
+    after = top + 16                                         # colours back after each row
+    assert s.peek(SCREEN1, 0x7D0 + after * 80)[0] == 0x0F and s.peek(SCREEN1, 0x17D0 + after * 80)[0] == 0
+    rows = run(s, "vmode p")                                 # standard output = /Term, Classic
+    assert any("Super screens only" in r for r in rows), rows
+    run(s, "vmode p -v >/w1")
+    lines = [bytes(s.peek(SCREEN1, r * 80, 9)).decode("latin-1") for r in range(25)]
+    assert "FF EEEEEE" in [ln.upper() for ln in lines], lines
+    check_hardware(s)
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in globals().items() if n.startswith("test_")]
     failed = 0
