@@ -11,6 +11,7 @@ result
 # Build artifacts
 *.o
 *.s19
+!tests/emu/asm/*.s19
 *.luac
 
 # Editor
