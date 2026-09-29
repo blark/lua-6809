@@ -31,10 +31,16 @@ sections 1-5) instead, starting from its reset map:
                MMU registers above and MMU_CTRL ($FFA1, bit 1 VECRAM)
   $FFF0-$FFFF  the vectors: offset $1FF0 of VECPG, CONSTPG when VECRAM = 1,
                else the ROM page $FE (CPU vector fetches read them too)
+  $FF50-$FF52  video (section 6): VIDEO_CTRL (bit 0: screen $FC or $FD shown),
+               PAL_INDEX, PAL_DATA (R, G, B of entry PAL_INDEX; every access
+               moves to the next colour, after B to the next entry). The
+               palette starts as xterm-256 (the configuration contents)
 
-Writes to the ROM page, or to the upper half ($1000-$1FFF) of screen page $FC
-(free RAM on the board, but it sets the screen's dirty flag; nothing uses it),
-are errors here, through any slot. The storage keeps the reset map's view in
+Writes to the ROM page, or to the upper half ($1000-$1FFF) of a screen page
+($FC, $FD) whose FORMAT byte ($FA2) is Classic (free RAM on the board, but it
+sets the screen's dirty flag; nothing uses it), are errors here, through any
+slot. A Super screen (FORMAT bit 0) keeps its code high bytes and background
+colours there. super_cell() reads a Super cell of either screen. The storage keeps the reset map's view in
 _mem: page $F8 + n at $2000 * n, page $FC at $C000, the ROM page $FE at $E000
 (offsets $1F00-$1FEF included), so code that peeks _mem under the reset map
 sees the logical addresses.
@@ -66,11 +72,27 @@ RESET_MAP = (0xF8, 0xF9, 0xFA, 0xFB, 0x00, 0x01, 0xFC, 0xFE)
 MAP0, MAP1, TASK, MMU_CTRL, CONSTPG = 0xFF80, 0xFF88, 0xFFA0, 0xFFA1, 0xFFA2
 VECRAM = 0x02                  # MMU_CTRL bit 1
 CONST_PAGE, VECTORS = 0xFE00, 0xFFF0
+VIDEO_CTRL, PAL_INDEX, PAL_DATA = 0xFF50, 0xFF51, 0xFF52
+FORMAT, FMT_SUPER = 0xFA2, 0x01   # a screen page's FORMAT byte and its Super bit
+SUPER_HI, SUPER_ATTR = 0x1000, 0x7D0  # plane B (code high bytes), the colour planes' offset
 ACIA_FREE2 = range(0xFF02, 0xFF04)  # free; MON09's INIT writes them (harmless)
 
 
 class BusError(Exception):
     pass
+
+
+def xterm256():
+    """The palette's configuration contents (MEMORY-V2-SPEC.md section 6), 768 bytes."""
+    ansi = ("000000 800000 008000 808000 000080 800080 008080 C0C0C0 "
+            "808080 FF0000 00FF00 FFFF00 0000FF FF00FF 00FFFF FFFFFF").split()
+    pal = bytearray(b"".join(bytes.fromhex(h) for h in ansi))
+    lv = (0x00, 0x5F, 0x87, 0xAF, 0xD7, 0xFF)
+    for i in range(216):
+        pal += bytes((lv[i // 36], lv[i // 6 % 6], lv[i % 6]))
+    for n in range(24):
+        pal += bytes((8 + 10 * n,) * 3)
+    return pal
 
 
 class Anachron8Memory(Memory64K):
@@ -87,6 +109,9 @@ class Anachron8Memory(Memory64K):
         self.mmu_ctrl = 0
         self.constpg = PG_ROM
         self._slots = None                      # v2: (buffer, base) of each active slot
+        self.video_ctrl = 0                     # v2: VIDEO_CTRL
+        self.palette = xterm256()               # v2: 256 x R, G, B
+        self.pal_pos = 0                        # v2: PAL_INDEX * 3 + the colour step
         self.touched = set()  # RAM addresses written (with track_usage)
         if map == "v2" and rom_hex == MON09_HEX:
             rom_hex = None  # MON09 v1 does not run under v2
@@ -177,11 +202,37 @@ class Anachron8Memory(Memory64K):
         page, offset = self._where(address)
         if page == PG_ROM:
             raise BusError(f"write ${value:02X} to ROM page $FE at ${address:04X}")
-        if page == PG_SCREEN0 and offset >= SCREEN_HI - 0xC000:
-            raise BusError(f"write ${value:02X} to the screen page's upper half at ${address:04X}")
+        if page in (PG_SCREEN0, PG_SCREEN1) and offset >= SUPER_HI \
+                and not self.page_bytes(page, FORMAT, 1)[0] & FMT_SUPER:
+            raise BusError(f"write ${value:02X} to the upper half of Classic screen ${page:02X} at ${address:04X}")
         where = self._page(page, offset)
         if where:
             where[0][where[1]] = value
+
+    def _video_read(self, address):
+        """v2 video registers, or None."""
+        if address == VIDEO_CTRL:
+            return self.video_ctrl
+        if address == PAL_INDEX:
+            return self.pal_pos // 3
+        if address == PAL_DATA:
+            value = self.palette[self.pal_pos]
+            self.pal_pos = (self.pal_pos + 1) % len(self.palette)
+            return value
+        return None
+
+    def _video_write(self, address, value):
+        """v2 video registers: True if it was one."""
+        if address == VIDEO_CTRL:
+            self.video_ctrl = value & 1
+        elif address == PAL_INDEX:
+            self.pal_pos = value * 3
+        elif address == PAL_DATA:
+            self.palette[self.pal_pos] = value
+            self.pal_pos = (self.pal_pos + 1) % len(self.palette)
+        else:
+            return False
+        return True
 
     def _mmu_read(self, address):
         """v2 MMU registers, or None."""
@@ -219,6 +270,8 @@ class Anachron8Memory(Memory64K):
     def _io_read(self, address):
         if self.map == "v2":
             value = self._mmu_read(address)
+            if value is None:
+                value = self._video_read(address)
             if value is not None:
                 return value
             if address in (IO2 + MMU_BANK4, IO2 + MMU_BANK5):
@@ -236,7 +289,7 @@ class Anachron8Memory(Memory64K):
 
     def _io_write(self, address, value):
         if self.map == "v2":
-            if self._mmu_write(address, value):
+            if self._mmu_write(address, value) or self._video_write(address, value):
                 return
             if address in (IO2 + MMU_BANK4, IO2 + MMU_BANK5):
                 self.maps[self.task][4 + address - IO2 - MMU_BANK4] = value
@@ -277,6 +330,17 @@ class Anachron8Memory(Memory64K):
             where = self._page(page, offset + i)
             out.append(where[0][where[1]] if where else 0xFF)
         return bytes(out)
+
+    def super_cell(self, page, row, col):
+        """(code, fg, bg) of a Super cell of screen page $FC or $FD (v2)."""
+        off = row * COLS + col
+        lo, fg = self.page_bytes(page, off, 1)[0], self.page_bytes(page, SUPER_ATTR + off, 1)[0]
+        hi, bg = self.page_bytes(page, SUPER_HI + off, 1)[0], self.page_bytes(page, SUPER_HI + SUPER_ATTR + off, 1)[0]
+        return hi << 8 | lo, fg, bg
+
+    def super_text(self, page, row):
+        """A row of a Super screen as a string, trailing blanks removed (U+0000 as a blank)."""
+        return "".join(chr(self.super_cell(page, row, c)[0] or 0x20) for c in range(COLS)).rstrip()
 
     def screen(self):
         """The VRAM text screen as 25 strings, trailing blanks removed."""
