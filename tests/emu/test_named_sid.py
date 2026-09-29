@@ -20,7 +20,8 @@ sys.path.insert(0, str(HERE.parent.parent))
 from emu.a8run import Machine  # noqa: E402
 from emu.board import SID_FRAME  # noqa: E402
 from emu.drivewire import (  # noqa: E402
-    E_SECT, OP_NAMEOBJ_CREATE, OP_NAMEOBJ_MOUNT, OP_READEX, OP_WRITE, DWProtocolError, DWServer,
+    E_SECT, E_UNIT, E_WRITE, OP_NAMEOBJ_CREATE, OP_NAMEOBJ_MOUNT, OP_READEX, OP_WRITE,
+    DWProtocolError, DWServer,
 )
 
 
@@ -48,56 +49,72 @@ def read(srv, drive, lsn):
 
 
 # --- named objects -------------------------------------------------------------------------------
-def test_named_create_write_mount_read():
+def test_named_miss_create_write_reset_mount_read():
     with tempfile.TemporaryDirectory() as d:
-        srv = DWServer(named_dir=d)
+        saves = Path(d) / "saves"                                       # made by the first CREATE
+        srv = DWServer(named_dir=saves)
         srv.attach(0, sectors=4)
         assert named(srv, OP_NAMEOBJ_MOUNT, b"game.hi") == 0          # not there yet
         drive = named(srv, OP_NAMEOBJ_CREATE, b"game.hi")
-        assert drive == 1 and (Path(d) / "game.hi").read_bytes() == b""
-        assert read(srv, drive, 0)[0] == E_SECT                          # empty object
+        assert drive == 255 and (saves / "game.hi").read_bytes() == b""
+        assert read(srv, drive, 0) == (0, bytes(256))                    # past the end: zeros, OK
         data = bytes(range(256))
         assert write(srv, drive, 0, data) == 0
-        assert (Path(d) / "game.hi").read_bytes() == data                # written through
-        assert named(srv, OP_NAMEOBJ_CREATE, b"game.hi") == 0            # exists: create fails
-        srv2 = DWServer(named_dir=d)                                     # a new server (reboot)
-        drive = named(srv2, OP_NAMEOBJ_MOUNT, b"game.hi")
-        assert drive == 1 and read(srv2, drive, 0) == (0, data)
-        assert srv2.named_ops == [(OP_NAMEOBJ_MOUNT, b"game.hi", 1)]
+        assert (saves / "game.hi").read_bytes() == data                  # written through
+        assert named(srv, OP_NAMEOBJ_MOUNT, b"GAME.HI") == 255           # the same object, same drive
+        assert named(srv, OP_NAMEOBJ_CREATE, b"game.hi") == 0            # mounted: it exists
+        srv.release_named()                                              # a 6809 reset over SPI
+        assert read(srv, 255, 0)[0] == E_UNIT
+        assert named(srv, OP_NAMEOBJ_CREATE, b"Game.hi") == 0            # exists on the card
+        assert named(srv, OP_NAMEOBJ_MOUNT, b"game.hi") == 255
+        assert read(srv, 255, 0) == (0, data)
+        assert srv.named_ops[-1] == (OP_NAMEOBJ_MOUNT, b"game.hi", 255)
 
 
-def test_named_lease_and_drive_numbers():
+def test_named_slots():
     with tempfile.TemporaryDirectory() as d:
         srv = DWServer(named_dir=d)
         srv.attach(0, sectors=1)
-        srv.attach(1, sectors=1)
-        (Path(d) / "a").write_bytes(bytes(256))
-        (Path(d) / "b").write_bytes(bytes([7]) * 256)
-        assert named(srv, OP_NAMEOBJ_MOUNT, b"a") == 2                   # lowest free drive
-        assert named(srv, OP_NAMEOBJ_MOUNT, b"b") == 2                   # the lease moved to b
-        assert read(srv, 2, 0) == (0, bytes([7]) * 256)
-        assert named(srv, OP_NAMEOBJ_MOUNT, b"none") == 0
-        assert 2 not in srv.drives                                       # released, not remounted
-        assert sorted(srv.drives) == [0, 1]
+        drives = [named(srv, OP_NAMEOBJ_CREATE, f"f{i}".encode()) for i in range(5)]
+        assert drives == [255, 254, 253, 252, 0]                         # four slots, counting down
+        assert read(srv, 0, 0)[0] == 0 and read(srv, 251, 0)[0] == E_UNIT
+        assert named(srv, OP_NAMEOBJ_MOUNT, b"f1") == 254
+        srv.release_named()
+        assert named(srv, OP_NAMEOBJ_MOUNT, b"f4") == 0                  # never created
+        assert named(srv, OP_NAMEOBJ_MOUNT, b"f3") == 255                # the first free slot
 
 
-def test_named_plain_names_only():
+def test_named_grow_and_limits():
+    with tempfile.TemporaryDirectory() as d:
+        srv = DWServer(named_dir=d)
+        drive = named(srv, OP_NAMEOBJ_CREATE, b"big")
+        (Path(d) / "big").write_bytes(b"abc")                            # a partial sector
+        assert read(srv, drive, 0) == (0, b"abc".ljust(256, b"\0"))
+        assert write(srv, drive, 2, bytes([9] * 256)) == 0               # the gap filled with zeros
+        assert (Path(d) / "big").read_bytes() == b"abc".ljust(512, b"\0") + bytes([9] * 256)
+        assert write(srv, drive, 3 + 65, bytes(256)) == E_WRITE          # a gap over 64 sectors
+        assert write(srv, drive, 3 + 64, bytes(256)) == 0
+        assert write(srv, drive, 65536, bytes(256)) == E_SECT
+
+
+def test_named_name_rules():
     with tempfile.TemporaryDirectory() as d:
         (Path(d) / "sub").mkdir()
-        (Path(d) / "sub" / "x").write_bytes(bytes(256))
         srv = DWServer(named_dir=d)
-        for bad in (b"", b".", b"..", b"sub/x", b"..\\x", b"a\x00b", b"sub"):
-            assert named(srv, OP_NAMEOBJ_MOUNT, bad) == 0, bad
-        assert named(srv, OP_NAMEOBJ_CREATE, b"../escape") == 0
-        assert not (Path(d).parent / "escape").exists()
+        for bad in (b"", b".x", b"x.", b"..", b"sub/x", b"a b", b"a\\b", b"a\x00", b"x" * 65, b"\xe9"):
+            assert named(srv, OP_NAMEOBJ_CREATE, bad) == 0, bad
+        assert named(srv, OP_NAMEOBJ_MOUNT, b"sub") == 0                 # a directory
+        assert named(srv, OP_NAMEOBJ_CREATE, b"A-z_0.9") == 255
+        assert named(srv, OP_NAMEOBJ_CREATE, b"x" * 64) == 254
+        assert sorted(f.name for f in Path(d).iterdir()) == ["A-z_0.9", "sub", "x" * 64]
 
 
-def test_named_directory_missing():
-    """No card: the saves directory is not there, so both calls fail."""
+def test_named_no_card():
     with tempfile.TemporaryDirectory() as d:
-        srv = DWServer(named_dir=Path(d) / "nocard")
+        (Path(d) / "x.hi").write_bytes(bytes(256))
+        srv = DWServer(named_dir=d, card=False)
         assert named(srv, OP_NAMEOBJ_MOUNT, b"x.hi") == 0
-        assert named(srv, OP_NAMEOBJ_CREATE, b"x.hi") == 0
+        assert named(srv, OP_NAMEOBJ_CREATE, b"y.hi") == 0
 
 
 def test_named_unsupported():

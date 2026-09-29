@@ -113,9 +113,11 @@ uv run tests/emu/test_os9_devices.py
 uv run tests/emu/test_named_sid.py            # DriveWire named objects, the SID player's registers
 ```
 
-The DriveWire server also serves DriveWire 4 named objects
-(`DWServer(named_dir=...)`, files in a host directory) and can ignore unknown
-opcodes as the ESP32 does (`ignore_unknown=True`); the board models SID1 and
+The DriveWire server also serves DriveWire 4 named objects as anachronsole
+does (`DWServer(named_dir=...)`: files in a host directory standing for the
+card's `saves/`, drives 255-252, `release_named()` for a reset over SPI,
+`card=False`) and can ignore unknown opcodes as the ESP32 does
+(`ignore_unknown=True`); the board models SID1 and
 the 6502 player's loader and control registers (`$FF20-$FF3F`, `$FFB0-$FFB7`;
 `sid=False` for a bitstream without them). Details in the module docstrings.
 
