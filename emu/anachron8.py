@@ -137,17 +137,23 @@ class Anachron8Memory(Memory64K):
             raise BusError(f"write ${value:02X} to ROM at ${address:04X}")
         if SCREEN_HI <= address < ROM:
             raise BusError(f"write ${value:02X} to the screen page's upper half at ${address:04X}")
-        if 0x8000 <= address < 0xC000:
-            page = self.bank[(address >> 13) - 4]
-            if page == PG_ROM:
-                raise BusError(f"write ${value:02X} to ROM page $FE at ${address:04X}")
-            where = self._page(page, address & 0x1FFF)
-            if where:
-                where[0][where[1]] = value
-            return
         if self.track_usage:
             self.touched.add(address)
+        if 0x8000 <= address < 0xC000:
+            self._window_write(address, value)
+            return
         self._mem[address] = value
+
+    def _window_write(self, address, value):
+        """A write through slot 4 or 5 (v2), with the checks of a direct one."""
+        page, offset = self.bank[(address >> 13) - 4], address & 0x1FFF
+        if page == PG_ROM:
+            raise BusError(f"write ${value:02X} to ROM page $FE at ${address:04X}")
+        if page == PG_SCREEN0 and offset >= SCREEN_HI - 0xC000:
+            raise BusError(f"write ${value:02X} to the screen page's upper half at ${address:04X}")
+        where = self._page(page, offset)
+        if where:
+            where[0][where[1]] = value
 
     # --- I/O -------------------------------------------------------------
     def _io_v1(self, address):
@@ -184,9 +190,10 @@ class Anachron8Memory(Memory64K):
             a = address + i
             if a >= ROM or (a < 0x1000 and self.map == "v1"):
                 raise BusError(f"load into ${a:04X} (not RAM)")
+            if self.map == "v2" and SCREEN_HI <= a:
+                raise BusError(f"load into ${a:04X} (the screen page's upper half)")
             if 0x8000 <= a < 0xC000 and self.map == "v2":
-                buf, idx = self._page(self.bank[(a >> 13) - 4], a & 0x1FFF)
-                buf[idx] = b
+                self._window_write(a, b)
             elif 0x8000 <= a < 0xC000:
                 self.sdram[self._sdram_index(a)] = b
             else:
