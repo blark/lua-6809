@@ -98,6 +98,20 @@ luac6809 -o prog.luac prog.lua && tools/bytecode_s19.py prog.luac   # prog.s19 a
 The Anachron8 memory model is strict: writes to ROM or unmapped I/O, and loads
 outside RAM, stop the run with a bus error.
 
+### Operating system bench (NitrOS-9 bring-up)
+
+`emu/a8run.py` runs code on memory map v2 with what an OS needs: `emu/a8cpu.py`
+(the MC6809 package's CPU plus SWI/SWI2/SWI3, CWAI, SYNC, IRQ/FIRQ/NMI lines
+and a PSHU/PULU S fix), `emu/board.py` (tick timer, keyboard FIFO and IRQ,
+DW port) and `emu/drivewire.py` (an in-process DriveWire server on image
+files). `--no-strict` gives the board's behaviour instead of bus errors
+(ROM writes ignored, free I/O reads $FF).
+
+```bash
+uv run emu/a8run.py --raw rom.bin@FE --drive 0=nos9.dsk -n 5000000 --trace 64
+uv run tests/emu/test_os9_devices.py
+```
+
 ## Getting Started
 
 Requires [Nix](https://nixos.org/) with flakes enabled.
