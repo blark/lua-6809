@@ -37,6 +37,17 @@ as the 6809 sees them, with no 6502 and no SID sound (sid=True, the default):
   $FFB5       SID_SONG: the parameter block's SONG byte
   $FFB6/$FFB7 read $FF
 
+SID2 ($FF60-$FF7F, sids=2, the default; anachron8 master 282206d) is the
+same at offset $40: its writes are logged in sid.sid2_writes as (cycle,
+register, value) and kept in sid.sid2 (32 registers) while SID_CTRL bit 2
+(OWNER2) is 0, dropped while it is 1; $FF79/$FF7A read $FF, $FF7B/$FF7C 0.
+SID_CTRL keeps bit 2 and SID_STATUS shows it as bit 4; a stop of a running
+player (RUN 1 -> 0) resets both chips (sid.sid2 back to zeros), and for
+the reset pulse's 35 us after it SID1 and SID2 writes are consumed
+(sid.dropped counts them), as on the board. sids=1 is
+the bitstream before it: $FF60-$FF7F read $FF and ignore writes, SID_CTRL
+bit 2 reads 0.
+
 sid.log records every SID_CTRL write as (cycle, value). sid=False is a
 bitstream without them: all of $FF20-$FF3F and $FFB0-$FFB7 read $FF and
 ignore writes, strict or not.
@@ -62,16 +73,24 @@ DW_STATUS, DW_DATA, TICK_CTRL, TICK_STATUS, TICK_COUNT = 0x48, 0x49, 0x4A, 0x4B,
 DW_RX, DW_TX_FULL = 0x02, 0x04
 KBD_SIZE, DW_FIFO = 16, 512
 SID1, SID1_MIRROR, SID1_END = 0x20, 0x39, 0x40
+SID2, SID2_MIRROR, SID2_END = 0x60, 0x79, 0x80
 LADDR_HI, LADDR_LO, LDATA, SID_CTRL, SID_STATUS, SID_SONG, SIDCPU_END = 0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB8
-SID_RUN, SID_OWNER, SID_IRQ_SEEN = 0x01, 0x02, 0x04
+SID_RUN, SID_OWNER, SID_OWNER2, SID_IRQ_SEEN = 0x01, 0x02, 0x04, 0x04
+STATUS_OWNER2 = 0x10
 SID_RAM, SID_PARAMS = 0x8000, 0xDF00
 SID_FRAME = E_HZ // 50                   # CPU cycles in the player's 50 Hz frame
+SID_RESET_PULSE = E_HZ * 35 // 1_000_000  # CPU cycles of the SID reset pulse (35 us)
 
 
 class SidPlayer:
     """What the 6809 sees of SID1 and SIDCPU (no 6502 runs)."""
 
-    def __init__(self):
+    def __init__(self, sids=2):
+        self.sids = sids
+        self.sid2 = bytearray(32)            # SID2's registers as written (sids=2)
+        self.sid2_writes = []                # (cycle, register, value) taken while the 6809 owns SID2
+        self.reset_at = None                 # the cycle of the last SID reset
+        self.dropped = 0                     # SID writes consumed by a reset pulse
         self.ram = bytearray(SID_RAM)        # the 6502's RAM
         self.params = bytearray(8)           # $DF00-$DF07
         self.laddr = 0
@@ -97,6 +116,8 @@ class SidPlayer:
     def read(self, reg, cycles):
         if SID1 <= reg < SID1_END:
             return 0x00 if SID1_MIRROR + 2 <= reg < SID1_MIRROR + 4 else 0xFF
+        if SID2 <= reg < SID2_END:
+            return 0x00 if self.sids == 2 and SID2_MIRROR + 2 <= reg < SID2_MIRROR + 4 else 0xFF
         if reg == LADDR_HI:
             return self.laddr >> 8
         if reg == LADDR_LO:
@@ -109,7 +130,8 @@ class SidPlayer:
             return self.ctrl
         if reg == SID_STATUS:
             seen = self.run_at is not None and cycles - self.run_at >= SID_FRAME
-            return self.ctrl | (SID_IRQ_SEEN if seen else 0)
+            owner2 = STATUS_OWNER2 if self.ctrl & SID_OWNER2 else 0
+            return (self.ctrl & (SID_RUN | SID_OWNER)) | owner2 | (SID_IRQ_SEEN if seen else 0)
         if reg == SID_SONG:
             return self.params[4]
         return 0xFF
@@ -118,9 +140,17 @@ class SidPlayer:
         """False for a register that takes no writes (SID_STATUS)."""
         if reg == SID_STATUS:
             return False
+        if (SID1 <= reg < SID1_END or SID2 <= reg < SID2_END) and self.reset_at is not None \
+                and cycles - self.reset_at < SID_RESET_PULSE:
+            self.dropped += 1                # the reset pulse takes it
+            return True
         if SID1 <= reg < SID1_END:
             if not self.ctrl & SID_OWNER and reg < SID1_MIRROR:
                 self.sid1_writes.append((reg - SID1, value))
+        elif SID2 <= reg < SID2_END:
+            if self.sids == 2 and not self.ctrl & SID_OWNER2 and reg < SID2_MIRROR:
+                self.sid2[reg - SID2] = value
+                self.sid2_writes.append((cycles, reg - SID2, value))
         elif reg == LADDR_HI:
             self.laddr = value << 8 | (self.laddr & 0xFF)
         elif reg == LADDR_LO:
@@ -132,11 +162,13 @@ class SidPlayer:
             self.log.append((cycles, value))
             if self.ctrl & SID_RUN and not value & SID_RUN:
                 self.resets += 1
+                self.reset_at = cycles
+                self.sid2[:] = bytes(32)     # the core's one reset: both chips
             if value & SID_RUN and not self.ctrl & SID_RUN:
                 self.run_at = cycles
             elif not value & SID_RUN:
                 self.run_at = None
-            self.ctrl = value & (SID_RUN | SID_OWNER)
+            self.ctrl = value & (SID_RUN | SID_OWNER | (SID_OWNER2 if self.sids == 2 else 0))
         elif reg == SID_SONG:
             self.params[4] = value
         return True
@@ -150,9 +182,9 @@ class SidPlayer:
 
 
 class Anachron8Board(Anachron8Memory):
-    def __init__(self, cfg, map="v2", dw=None, dw_latency=300, sid=True, **kwargs):
+    def __init__(self, cfg, map="v2", dw=None, dw_latency=300, sid=True, sids=2, **kwargs):
         super().__init__(cfg, map=map, **kwargs)
-        self.sid = SidPlayer() if sid and map == "v2" else None
+        self.sid = SidPlayer(sids) if sid and map == "v2" else None
         self.sid_absent = not sid and map == "v2"
         self.dw = dw                     # a DWServer, or None: nothing answers
         self.dw_latency = dw_latency     # cycles before a server reply shows up
@@ -207,7 +239,8 @@ class Anachron8Board(Anachron8Memory):
 
     # --- I/O -------------------------------------------------------------------------------
     def _sid_reg(self, reg):
-        return self.map == "v2" and (SID1 <= reg < SID1_END or LADDR_HI <= reg < SIDCPU_END)
+        return self.map == "v2" and (SID1 <= reg < SID1_END or SID2 <= reg < SID2_END
+                                     or LADDR_HI <= reg < SIDCPU_END)
 
     def _io_read(self, address):
         reg = self._io_v1(address)

@@ -188,11 +188,36 @@ def test_sid_run_owner_reset():
     Machine(strict=False).mem.write_byte(0xFFB4, 0)                     # the board ignores it
 
 
+def test_sid2():
+    m = Machine()
+    sid = m.mem.sid
+    io(m, 0x78, 0x0A)                                   # the 6809 owns SID2
+    io(m, 0xB3, 0x07)                                   # RUN, OWNER, OWNER2
+    assert io(m, 0xB3) == 0x07 and io(m, 0xB4) & 0x13 == 0x13
+    io(m, 0x64, 0x11)                                   # dropped: the 6502's
+    io(m, 0xB3, 0x03)                                   # OWNER2 = 0
+    io(m, 0x61, 0x22)
+    assert [(r, v) for _, r, v in sid.sid2_writes] == [(0x18, 0x0A), (0x01, 0x22)]
+    assert sid.sid2[0x04] == 0 and io(m, 0xB4) & 0x10 == 0
+    assert io(m, 0x7B) == 0 and io(m, 0x79) == 0xFF and io(m, 0x60) == 0xFF
+    io(m, 0xB3, 0x00)                                   # the stop resets both chips
+    assert sid.sid2 == bytes(32)
+    io(m, 0x78, 0x0F)                                   # during the 35 us pulse: consumed
+    assert sid.sid2[0x18] == 0 and sid.dropped == 1
+    m.cpu.cycles += 219
+    io(m, 0x78, 0x0F)
+    assert sid.sid2[0x18] == 0x0F
+    one = Machine(sids=1)                               # the bitstream before SID2
+    io(one, 0x78, 0x0F)
+    io(one, 0xB3, 0x07)
+    assert io(one, 0xB3) == 0x03 and io(one, 0x7B) == 0xFF and one.mem.sid.sid2_writes == []
+
+
 def test_sid_absent():
     for strict in (True, False):
         m = Machine(sid=False, strict=strict)
         assert m.mem.sid is None
-        for reg in (0x20, 0x3B, 0xB0, 0xB3, 0xB4, 0xB7):
+        for reg in (0x20, 0x3B, 0x60, 0x7B, 0xB0, 0xB3, 0xB4, 0xB7):
             assert io(m, reg) == 0xFF
         io(m, 0xB3, 0x03)                               # ignored
         assert io(m, 0xB3) == 0xFF
