@@ -35,12 +35,16 @@ OS-9 disk (writes land in the copy), strict=False (the board's behaviour),
 and records the D.BtBug characters, a stop at the halt loop (with the trace
 ring), any DriveWire access to drive 0 and any CPU write to pages $FC-$FF.
 
-The console /Term is the screen (a8vtio, Classic screen 0 = page $FC): the
-session reads the prompt, the typed echo and command output from the screen
-(screen(), cursor(), screen_dump()). The ACIA is /T1; its output is console().
+The console is two screens (a8vtio + CoClassic): /Term on screen 0 (page
+$FC) and /W1 on screen 1 (page $FD), each with a shell; the keyboard goes to
+the displayed one (VIDEO_CTRL bit 0, displayed()), and Ctrl-B (SWITCH_KEY)
+shows the other. The session reads prompts, the typed echo and command output
+from either page (screen(), cursor(), screen_dump(); page= picks the screen,
+/Term's by default). The ACIA is /T1; its output is console().
 
     uv run emu/os9boot.py                       # boot to the shell prompt
     uv run emu/os9boot.py --cmd dir --cmd mfree # then type commands
+    uv run emu/os9boot.py --w1 --cmd procs      # ... on /W1 (after Ctrl-B)
 
 Defaults come from ~/src/nitros9/recipes/anachron8/dw.
 """
@@ -71,8 +75,10 @@ RESET_SLOT5 = 0x01
 D_BTBUG, D_CRASH, HALT = 0x5E, 0x6B, 0x6E
 RTS, JMP, BRA = 0x39, 0x7E, 0x20
 VECTOR_STUBS = (0xFEEE, 0xFEF1, 0xFEF4, 0xFEF7, 0xFEFA, 0xFEFD)   # $FFF2 SWI3 .. $FFFC NMI
-PROMPT = re.compile(r"\{Term\|\d+\}[^\n]*:\s*$")   # Shell+: {Term|02}/DD:
-SCREEN0 = 0xFC                                    # /Term's screen page
+PROMPT = re.compile(r"\{\w+\|\d+\}[^\n]*:\s*$")    # Shell+: {Term|02}/DD:, {W1|05}/DD:
+SCREEN0, SCREEN1 = 0xFC, 0xFD                     # the screen pages of /Term and /W1
+SCREENS = (SCREEN0, SCREEN1)
+SWITCH_KEY = "\x02"                               # Ctrl-B: a8vtio shows the other screen
 
 
 def kernel_info(path=KERNEL_JSON):
@@ -236,54 +242,73 @@ class OS9Session:
         self._screen_written = True
         return self.run(count, check)
 
-    def cursor_line(self):
+    def cursor_line(self, page=SCREEN0):
         """The text of the cursor's row up to the cursor, and whether the rest of it is blank."""
-        cur = self.cursor()
+        cur = self.cursor(page)
         if cur is None:
             return None, False
         col, row = cur
-        text = "".join(chr(c) if 32 <= c < 127 else " " for c in self.peek(SCREEN0, row * 80, 80))
+        text = "".join(chr(c) if 32 <= c < 127 else " " for c in self.peek(page, row * 80, 80))
         return text[:col].rstrip(), not text[col:].strip()
 
-    def at_prompt(self):
+    def at_prompt(self, page=SCREEN0):
         """True when the cursor stands just after a Shell+ prompt on an otherwise blank line."""
-        before, rest_blank = self.cursor_line()
+        before, rest_blank = self.cursor_line(page)
         return before is not None and rest_blank and bool(PROMPT.fullmatch(before))
 
-    def wait_prompt(self, count):
+    def wait_prompt(self, count, page=SCREEN0):
         """Run until the screen shows the shell prompt at the cursor."""
-        return self.wait_screen(self.at_prompt, count)
+        return self.wait_screen(lambda: self.at_prompt(page), count)
 
-    def command(self, line, count=50_000_000):
+    def command(self, line, count=50_000_000, page=None):
         """Type a command line on the keyboard and run until the next prompt; returns
-        (reason, screen rows). The line is typed, its echo awaited, then Enter."""
+        (reason, screen rows). The line is typed, its echo awaited, then Enter. The
+        keys go to the displayed screen, which is where the echo and prompt are awaited
+        unless `page` says otherwise."""
+        page = self.displayed() if page is None else page
         reason, _, err = self.type(line, count)
         if reason == "until" and line:
-            reason, _, err = self.wait_screen(lambda: (self.cursor_line()[0] or "").endswith(line), count)
+            reason, _, err = self.wait_screen(lambda: (self.cursor_line(page)[0] or "").endswith(line), count)
         if reason == "until":
             reason, _, err = self.type("\r", count)
         if reason == "until":
-            reason, _, err = self.wait_prompt(count)
-        return (reason if not err else f"error: {err}"), self.screen()
+            reason, _, err = self.wait_prompt(count, page)
+        return (reason if not err else f"error: {err}"), self.screen(page)
+
+    def switch_screen(self, count=5_000_000):
+        """Press the switch key and run until VIDEO_CTRL changes; returns the page displayed."""
+        shown = self.displayed()
+        reason, _, err = self.type(SWITCH_KEY, count)
+        if reason == "until":
+            reason, _, err = self.run(count, lambda cpu: self.displayed() != shown)
+        if reason != "until":
+            raise RuntimeError(f"switch key not taken: {reason} {err}")
+        return self.displayed()
 
     # --- inspection ------------------------------------------------------------------
-    def screen(self):
-        """/Term's Classic screen (page $FC) as 25 strings, trailing blanks removed."""
-        return self.m.screen_text(SCREEN0)
+    def screen(self, page=SCREEN0):
+        """A Classic screen (/Term's page $FC by default) as 25 strings, trailing blanks removed."""
+        return self.m.screen_text(page)
 
-    def cursor(self):
-        """(column, row) of /Term's cursor, None when hidden."""
-        return self.m.cursor(SCREEN0)
+    def cursor(self, page=SCREEN0):
+        """(column, row) of a screen's cursor (/Term's by default), None when hidden."""
+        return self.m.cursor(page)
 
-    def screen_dump(self):
+    def displayed(self):
+        """The page on display: VIDEO_CTRL bit 0 selects $FC or $FD."""
+        return SCREEN0 + (self.m.mem.video_ctrl & 1)
+
+    def screen_dump(self, page=SCREEN0):
         """The screen framed, with the cursor cell shown as '_' when it is blank."""
-        rows = [r.ljust(80) for r in self.screen()]
-        cur = self.cursor()
+        rows = [r.ljust(80) for r in self.screen(page)]
+        cur = self.cursor(page)
         if cur and rows[cur[1]][cur[0]] == " ":
             r = rows[cur[1]]
             rows[cur[1]] = r[:cur[0]] + "_" + r[cur[0] + 1:]
+        shown = " (displayed)" if page == self.displayed() else ""
         edge = "+" + "-" * 80 + "+"
-        return "\n".join([edge] + [f"|{r}|" for r in rows] + [edge, f"cursor {cur}"])
+        return "\n".join([f"page ${page:02X}{shown}", edge] + [f"|{r}|" for r in rows]
+                         + [edge, f"cursor {cur}"])
 
     def screen_writes(self, page=SCREEN0):
         """CPU writes to a page as (offset, value, pc)."""
@@ -337,11 +362,14 @@ class OS9Session:
         lines.append(f"block map: {len(bm)} pages, $F8-$FF = {' '.join(f'{b:02X}' for b in bm[0xF8:0x100])}"
                      if len(bm) == 256 else f"block map: {len(bm)} pages")
         lines.append(f"drive 0 accesses: {self.drive0 or 'none'}")
-        scr = self.screen_writes()
-        high = [w for w in scr if w[0] >= 0x1000]
-        other = [w for w in self.special_writes if w[0] != SCREEN0]
-        lines.append(f"writes to page $FC: {len(scr)} (upper 4 KB: {len(high)}), "
-                     f"to pages $FD-$FF: {len(other)}" + (f" (first {other[:5]})" if other else ""))
+        for page in SCREENS:
+            scr = self.screen_writes(page)
+            high = [w for w in scr if w[0] >= 0x1000]
+            lines.append(f"writes to page ${page:02X}: {len(scr)} (upper 4 KB: {len(high)}), "
+                         f"FORMAT {self.peek(page, 0xFA2)[0]}")
+        other = [w for w in self.special_writes if w[0] not in SCREENS]
+        lines.append(f"writes to pages $FE-$FF: {len(other)}" + (f" (first {other[:5]})" if other else ""))
+        lines.append(f"VIDEO_CTRL {self.m.mem.video_ctrl} (page ${self.displayed():02X} displayed)")
         return "\n".join(lines)
 
 
@@ -353,6 +381,7 @@ def main(argv=None):
     ap.add_argument("--keep", metavar="DIR", help="keep the drive images in DIR")
     ap.add_argument("-n", "--count", type=int, default=200_000_000, help="instructions to the prompt")
     ap.add_argument("--cmd", action="append", default=[], help="command to type at the prompt")
+    ap.add_argument("--w1", action="store_true", help="switch to /W1 (Ctrl-B) before the commands")
     ap.add_argument("--trace", type=int, default=64, metavar="N", help="trace entries printed on a stop")
     args = ap.parse_args(argv)
 
@@ -364,6 +393,10 @@ def main(argv=None):
     ok = reason == "until" and not s.halted
     print(f"boot: {reason}" + (f" after {steps} instructions" if steps else "")
           + (f": {err}" if err else "") + f" ({time.monotonic() - t0:.1f} s)")
+    if ok and args.w1:
+        reason, _, err = s.wait_prompt(args.count, SCREEN1)
+        ok = reason == "until" and s.switch_screen() == SCREEN1
+        print(f"/W1: {reason}" + (f": {err}" if err else ""))
     for line in args.cmd if ok else ():
         t0 = time.monotonic()
         reason, _ = s.command(line)
@@ -375,8 +408,9 @@ def main(argv=None):
     if not ok and s.m.cpu.trace:
         print("--- trace (oldest first) ---")
         print(s.m.cpu.format_trace())
-    print("--- screen ---")
-    print(s.screen_dump())
+    for page in SCREENS:
+        print(f"--- screen {page - SCREEN0} ---")
+        print(s.screen_dump(page))
     out = s.console().rstrip("\n")
     if out:
         print("--- ACIA (/T1) ---")

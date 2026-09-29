@@ -24,7 +24,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent.parent))
 
-from emu.os9boot import DISK, KERNEL, KERNEL_JSON, PROMPT, SCREEN0, OS9Session  # noqa: E402
+from emu.os9boot import DISK, KERNEL, KERNEL_JSON, PROMPT, SCREEN0, SCREENS, OS9Session  # noqa: E402
 
 BOOT_LIMIT = 5_000_000          # instructions; the boot takes about 1.5 million
 ROWS, COLS = 25, 80
@@ -59,11 +59,12 @@ def check_hardware(s):
     bm = s.blkmap()
     assert len(bm) == 256 and bytes(bm[0xF8:]) == bytes([0, 0, 0, 0, 4, 4, 0x80, 0x80])
     assert not s.drive0, s.drive0                            # the boot catalog is never touched
-    other = [w for w in s.special_writes if w[0] != SCREEN0]
-    assert not other, other[:5]                              # nothing writes pages $FD-$FF
-    high = [w for w in s.screen_writes() if w[0] >= 0x1000]
-    assert not high, high[:5]                                # nor the screen's upper 4 KB
-    assert s.peek(SCREEN0, 0xFA2)[0] == 0                    # FORMAT: Classic
+    other = [w for w in s.special_writes if w[0] not in SCREENS]
+    assert not other, other[:5]                              # nothing writes pages $FE-$FF
+    for page in SCREENS:                                     # /Term's and /W1's screens:
+        high = [w for w in s.screen_writes(page) if w[0] >= 0x1000]
+        assert not high, high[:5]                            # never the upper 4 KB
+        assert s.peek(page, 0xFA2)[0] == 0                   # FORMAT: Classic
 
 
 def test_os9_boot_to_shell():
