@@ -47,6 +47,7 @@ from emu.board import Anachron8Board  # noqa: E402
 from emu.drivewire import DWProtocolError, DWServer  # noqa: E402
 
 PAGE = 0x2000
+CURSOR = 0xFA0          # a screen page's cursor column and row ($FF hides)
 
 
 def parse_s19(data):
@@ -164,6 +165,13 @@ class Machine:
             rows.append("".join(chr(c) if 32 <= c < 127 else " " for c in row).rstrip())
         return rows
 
+    def cursor(self, page=None):
+        """(column, row) of the cursor of the screen page shown (or `page`), None when hidden."""
+        if page is None:
+            page = PG_SCREEN0 + (self.mem.video_ctrl & 1)
+        col, row = self.mem.page_bytes(page, CURSOR, 2)
+        return None if col == 0xFF or row == 0xFF else (col, row)
+
     def registers(self):
         c = self.cpu
         return (f"PC={c.program_counter.value:04X} A={c.accu_a.value:02X} B={c.accu_b.value:02X} "
@@ -279,7 +287,7 @@ def main(argv=None):
         while rows and not rows[-1]:
             rows.pop()
         if rows:
-            print("--- screen ---")
+            print(f"--- screen (cursor {m.cursor()}) ---")
             print("\n".join(rows))
     return 1 if reason == "error" else 0
 

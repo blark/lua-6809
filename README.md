@@ -116,11 +116,14 @@ uv run tests/emu/test_os9_devices.py
 (~/src/nitros9 `recipes/anachron8/dw`) the way the boot stub's catalog
 type 4 will: it is the stub's reference loader. It reports the D.BtBug
 progress characters, stops at the D.Crash halt loop with the trace, and
-flags DriveWire access to drive 0 and writes to pages $FC-$FF.
+flags DriveWire access to drive 0 and writes to pages $FC-$FF. The console
+/Term is the Classic screen (page $FC): commands are typed on the keyboard
+FIFO and read back from the screen (`screen()`, `cursor()`,
+`screen_dump()`); the ACIA is /T1 (`console()`).
 
 ```bash
 uv run emu/os9boot.py --cmd dir --cmd mfree   # boot to Shell+, type commands
-uv run tests/emu/test_os9_boot.py             # boot, dir, mfree (about 4 s)
+uv run tests/emu/test_os9_boot.py             # boot, dir, scrolling, keys, /T1 (about 15 s)
 ```
 
 ## Getting Started

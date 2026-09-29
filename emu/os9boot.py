@@ -35,6 +35,10 @@ OS-9 disk (writes land in the copy), strict=False (the board's behaviour),
 and records the D.BtBug characters, a stop at the halt loop (with the trace
 ring), any DriveWire access to drive 0 and any CPU write to pages $FC-$FF.
 
+The console /Term is the screen (a8vtio, Classic screen 0 = page $FC): the
+session reads the prompt, the typed echo and command output from the screen
+(screen(), cursor(), screen_dump()). The ACIA is /T1; its output is console().
+
     uv run emu/os9boot.py                       # boot to the shell prompt
     uv run emu/os9boot.py --cmd dir --cmd mfree # then type commands
 
@@ -68,6 +72,7 @@ D_BTBUG, D_CRASH, HALT = 0x5E, 0x6B, 0x6E
 RTS, JMP, BRA = 0x39, 0x7E, 0x20
 VECTOR_STUBS = (0xFEEE, 0xFEF1, 0xFEF4, 0xFEF7, 0xFEFA, 0xFEFD)   # $FFF2 SWI3 .. $FFFC NMI
 PROMPT = re.compile(r"\{Term\|\d+\}[^\n]*:\s*$")   # Shell+: {Term|02}/DD:
+SCREEN0 = 0xFC                                    # /Term's screen page
 
 
 def kernel_info(path=KERNEL_JSON):
@@ -148,10 +153,13 @@ class OS9Session:
         mem, dw = self.m.mem, self.m.dw
         store = mem._store_v2
 
+        self._screen_written = False
+
         def checked_store(address, value):
             page, offset = mem._where(address)
             if page >= 0xFC:
                 self.special_writes.append((page, offset, value, self.m.cpu.last_op_address))
+                self._screen_written = True
             store(address, value)
         mem._store_v2 = checked_store
 
@@ -218,16 +226,69 @@ class OS9Session:
             return pos[0] == len(data) and mem.keys_queued == 0
         return self.run(count, feed)
 
+    def wait_screen(self, test, count):
+        """Run until test() holds; test() is tried only after a CPU write to pages $FC-$FF."""
+        def check(cpu):
+            if not self._screen_written:
+                return False
+            self._screen_written = False
+            return test()
+        self._screen_written = True
+        return self.run(count, check)
+
+    def cursor_line(self):
+        """The text of the cursor's row up to the cursor, and whether the rest of it is blank."""
+        cur = self.cursor()
+        if cur is None:
+            return None, False
+        col, row = cur
+        text = "".join(chr(c) if 32 <= c < 127 else " " for c in self.peek(SCREEN0, row * 80, 80))
+        return text[:col].rstrip(), not text[col:].strip()
+
+    def at_prompt(self):
+        """True when the cursor stands just after a Shell+ prompt on an otherwise blank line."""
+        before, rest_blank = self.cursor_line()
+        return before is not None and rest_blank and bool(PROMPT.fullmatch(before))
+
+    def wait_prompt(self, count):
+        """Run until the screen shows the shell prompt at the cursor."""
+        return self.wait_screen(self.at_prompt, count)
+
     def command(self, line, count=50_000_000):
-        """Type a command line and run until the next prompt; returns (reason, output)."""
-        start = len(self.m.mem.console_output)
-        reason, _, err = self.type(line + "\r", count)
-        if reason != "until":
-            return reason if not err else f"error: {err}", self.console()[start:]
-        reason, _, err = self.wait_for(PROMPT, count, start)
-        return (reason if not err else f"error: {err}"), "".join(self.m.mem.console_output[start:])
+        """Type a command line on the keyboard and run until the next prompt; returns
+        (reason, screen rows). The line is typed, its echo awaited, then Enter."""
+        reason, _, err = self.type(line, count)
+        if reason == "until" and line:
+            reason, _, err = self.wait_screen(lambda: (self.cursor_line()[0] or "").endswith(line), count)
+        if reason == "until":
+            reason, _, err = self.type("\r", count)
+        if reason == "until":
+            reason, _, err = self.wait_prompt(count)
+        return (reason if not err else f"error: {err}"), self.screen()
 
     # --- inspection ------------------------------------------------------------------
+    def screen(self):
+        """/Term's Classic screen (page $FC) as 25 strings, trailing blanks removed."""
+        return self.m.screen_text(SCREEN0)
+
+    def cursor(self):
+        """(column, row) of /Term's cursor, None when hidden."""
+        return self.m.cursor(SCREEN0)
+
+    def screen_dump(self):
+        """The screen framed, with the cursor cell shown as '_' when it is blank."""
+        rows = [r.ljust(80) for r in self.screen()]
+        cur = self.cursor()
+        if cur and rows[cur[1]][cur[0]] == " ":
+            r = rows[cur[1]]
+            rows[cur[1]] = r[:cur[0]] + "_" + r[cur[0] + 1:]
+        edge = "+" + "-" * 80 + "+"
+        return "\n".join([edge] + [f"|{r}|" for r in rows] + [edge, f"cursor {cur}"])
+
+    def screen_writes(self, page=SCREEN0):
+        """CPU writes to a page as (offset, value, pc)."""
+        return [(o, v, pc) for p, o, v, pc in self.special_writes if p == page]
+
     def peek(self, page, offset, n=1):
         return self.m.mem.page_bytes(page, offset, n)
 
@@ -276,8 +337,11 @@ class OS9Session:
         lines.append(f"block map: {len(bm)} pages, $F8-$FF = {' '.join(f'{b:02X}' for b in bm[0xF8:0x100])}"
                      if len(bm) == 256 else f"block map: {len(bm)} pages")
         lines.append(f"drive 0 accesses: {self.drive0 or 'none'}")
-        lines.append(f"writes to pages $FC-$FF: {len(self.special_writes)}"
-                     + (f" (first {self.special_writes[:5]})" if self.special_writes else ""))
+        scr = self.screen_writes()
+        high = [w for w in scr if w[0] >= 0x1000]
+        other = [w for w in self.special_writes if w[0] != SCREEN0]
+        lines.append(f"writes to page $FC: {len(scr)} (upper 4 KB: {len(high)}), "
+                     f"to pages $FD-$FF: {len(other)}" + (f" (first {other[:5]})" if other else ""))
         return "\n".join(lines)
 
 
@@ -296,7 +360,7 @@ def main(argv=None):
         Path(args.keep).mkdir(parents=True, exist_ok=True)
     s = OS9Session(args.kernel, kernel_info(args.json), args.disk, workdir=args.keep, trace=args.trace)
     t0 = time.monotonic()
-    reason, steps, err = s.wait_for(PROMPT, args.count)
+    reason, steps, err = s.wait_prompt(args.count)
     ok = reason == "until" and not s.halted
     print(f"boot: {reason}" + (f" after {steps} instructions" if steps else "")
           + (f": {err}" if err else "") + f" ({time.monotonic() - t0:.1f} s)")
@@ -311,8 +375,12 @@ def main(argv=None):
     if not ok and s.m.cpu.trace:
         print("--- trace (oldest first) ---")
         print(s.m.cpu.format_trace())
-    print("--- ACIA ---")
-    print(s.console().rstrip("\n"))
+    print("--- screen ---")
+    print(s.screen_dump())
+    out = s.console().rstrip("\n")
+    if out:
+        print("--- ACIA (/T1) ---")
+        print(out)
     return 0 if ok else 1
 
 
