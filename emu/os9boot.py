@@ -42,6 +42,13 @@ shows the other. The session reads prompts, the typed echo and command output
 from either page (screen(), cursor(), screen_dump(); page= picks the screen,
 /Term's by default). The ACIA is /T1; its output is console().
 
+Either screen can be made Super (CoSuper: UTF-8 out, four planes, 256
+colours; FORMAT bit 0) at run time, with `vmode s </w1` or ESC $20 (DWSet)
+written to it; super_screen(), super_cell() and super_dump() read it, and
+screen_dump() picks the right one by the page's FORMAT. The low plane of a
+Super page holds ASCII as a Classic page does, so the prompt helpers work
+on both.
+
     uv run emu/os9boot.py                       # boot to the shell prompt
     uv run emu/os9boot.py --cmd dir --cmd mfree # then type commands
     uv run emu/os9boot.py --w1 --cmd procs      # ... on /W1 (after Ctrl-B)
@@ -79,6 +86,7 @@ PROMPT = re.compile(r"\{\w+\|\d+\}[^\n]*:\s*$")    # Shell+: {Term|02}/DD:, {W1|
 SCREEN0, SCREEN1 = 0xFC, 0xFD                     # the screen pages of /Term and /W1
 SCREENS = (SCREEN0, SCREEN1)
 SWITCH_KEY = "\x02"                               # Ctrl-B: a8vtio shows the other screen
+FORMAT = 0xFA2                                    # a screen page's FORMAT byte (bit 0 Super)
 
 
 def kernel_info(path=KERNEL_JSON):
@@ -298,14 +306,28 @@ class OS9Session:
         """The page on display: VIDEO_CTRL bit 0 selects $FC or $FD."""
         return SCREEN0 + (self.m.mem.video_ctrl & 1)
 
+    def is_super(self, page=SCREEN0):
+        return bool(self.peek(page, FORMAT)[0] & 1)
+
+    def super_cell(self, page, row, col):
+        """(code, fg, bg) of a Super screen's cell."""
+        return self.m.mem.super_cell(page, row, col)
+
+    def super_screen(self, page=SCREEN1):
+        """A Super screen as 25 strings (Unicode), trailing blanks removed."""
+        return [self.m.mem.super_text(page, r) for r in range(25)]
+
     def screen_dump(self, page=SCREEN0):
-        """The screen framed, with the cursor cell shown as '_' when it is blank."""
-        rows = [r.ljust(80) for r in self.screen(page)]
+        """The screen framed, with the cursor cell shown as '_' when it is blank
+        (a Super screen as Unicode, FORMAT shown)."""
+        sup = self.is_super(page)
+        rows = [r.ljust(80) for r in (self.super_screen(page) if sup else self.screen(page))]
         cur = self.cursor(page)
         if cur and rows[cur[1]][cur[0]] == " ":
             r = rows[cur[1]]
             rows[cur[1]] = r[:cur[0]] + "_" + r[cur[0] + 1:]
-        shown = " (displayed)" if page == self.displayed() else ""
+        shown = (" (displayed)" if page == self.displayed() else "") + \
+            f" FORMAT {self.peek(page, FORMAT)[0]}" + (" Super" if sup else "")
         edge = "+" + "-" * 80 + "+"
         return "\n".join([f"page ${page:02X}{shown}", edge] + [f"|{r}|" for r in rows]
                          + [edge, f"cursor {cur}"])

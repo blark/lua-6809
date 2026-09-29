@@ -124,6 +124,8 @@ FIFO and read back from the screen (`screen()`, `cursor()`,
 ```bash
 uv run emu/os9boot.py --cmd dir --cmd mfree   # boot to Shell+, type commands
 uv run tests/emu/test_os9_boot.py             # boot, dir, scrolling, keys, /T1 (about 15 s)
+uv run tests/emu/test_os9_screens.py          # /Term and /W1, screen switching
+uv run tests/emu/test_os9_super.py            # Super screen on /W1 (UTF-8, planes, palette)
 ```
 
 ## Getting Started
