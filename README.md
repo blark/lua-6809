@@ -110,7 +110,14 @@ files). `--no-strict` gives the board's behaviour instead of bus errors
 ```bash
 uv run emu/a8run.py --raw rom.bin@FE --drive 0=nos9.dsk -n 5000000 --trace 64
 uv run tests/emu/test_os9_devices.py
+uv run tests/emu/test_named_sid.py            # DriveWire named objects, the SID player's registers
 ```
+
+The DriveWire server also serves DriveWire 4 named objects
+(`DWServer(named_dir=...)`, files in a host directory) and can ignore unknown
+opcodes as the ESP32 does (`ignore_unknown=True`); the board models SID1 and
+the 6502 player's loader and control registers (`$FF20-$FF3F`, `$FFB0-$FFB7`;
+`sid=False` for a bitstream without them). Details in the module docstrings.
 
 `emu/os9boot.py` boots the NitrOS-9 Level 2 `anachron8` port
 (~/src/nitros9 `recipes/anachron8/dw`) the way the boot stub's catalog

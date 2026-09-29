@@ -19,6 +19,28 @@ cycles of 100 MHz each): a tick every 1,666,667 sync cycles (60 Hz) or
 (irq_line()) is KEY_STATUS bit 0 OR (TICK_STATUS bit 0 AND TICK_CTRL bit 0);
 A8CPU samples it before every instruction. FIRQ and NMI are not driven.
 
+Map v2 also has SID1 and the 6502 player's registers (anachron8
+docs/IO-REGISTERS.md "SID1", "SIDCPU"; docs/SID-PLAYER.md), modelled as far
+as the 6809 sees them, with no 6502 and no SID sound (sid=True, the default):
+
+  $FF20-$FF38 SID1 writes: logged in sid.sid1_writes while the 6809 owns the
+              chip, dropped while the 6502 does; reads $FF
+  $FF39-$FF3C POTX, POTY, OSC3, ENV3 (the mirror): read 0
+  $FFB0/$FFB1 LADDR_HI/LO (R/W)
+  $FFB2       LDATA: stores/reads [LADDR], then LADDR + 1 (the loader space:
+              the 6502's 32 KB at $0000-$7FFF, the parameter block at
+              $DF00-$DF07; elsewhere writes dropped, reads $FF)
+  $FFB3       SID_CTRL: bit 1 OWNER, bit 0 RUN; RUN 1 -> 0 resets the SID
+              (sid.resets); bits 7-2 read 0
+  $FFB4       SID_STATUS: RUN, OWNER, and bit 2 IRQ seen once RUN has been
+              set for one 50 Hz frame (20 ms: the driver's first VBI IRQ)
+  $FFB5       SID_SONG: the parameter block's SONG byte
+  $FFB6/$FFB7 read $FF
+
+sid.log records every SID_CTRL write as (cycle, value). sid=False is a
+bitstream without them: all of $FF20-$FF3F and $FFB0-$FFB7 read $FF and
+ignore writes, strict or not.
+
 A write to one of the read-only registers is a BusError when strict (the
 board ignores it). push_key() queues a key the way the ESP32 does (False
 when the FIFO is full: the key is dropped). reset() is the CPU reset: the
@@ -37,11 +59,95 @@ RNG_DATA, RNG_STATUS, KEY_STATUS, KEY_DATA = 0x44, 0x45, 0x46, 0x47
 DW_STATUS, DW_DATA, TICK_CTRL, TICK_STATUS, TICK_COUNT = 0x48, 0x49, 0x4A, 0x4B, 0x4C
 DW_RX, DW_TX_FULL = 0x02, 0x04
 KBD_SIZE, DW_FIFO = 16, 512
+SID1, SID1_MIRROR, SID1_END = 0x20, 0x39, 0x40
+LADDR_HI, LADDR_LO, LDATA, SID_CTRL, SID_STATUS, SID_SONG, SIDCPU_END = 0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB8
+SID_RUN, SID_OWNER, SID_IRQ_SEEN = 0x01, 0x02, 0x04
+SID_RAM, SID_PARAMS = 0x8000, 0xDF00
+SID_FRAME = E_HZ // 50                   # CPU cycles in the player's 50 Hz frame
+
+
+class SidPlayer:
+    """What the 6809 sees of SID1 and SIDCPU (no 6502 runs)."""
+
+    def __init__(self):
+        self.ram = bytearray(SID_RAM)        # the 6502's RAM
+        self.params = bytearray(8)           # $DF00-$DF07
+        self.laddr = 0
+        self.ctrl = 0
+        self.run_at = None                   # the cycle RUN was set
+        self.resets = 0                      # SID resets by RUN 1 -> 0
+        self.log = []                        # (cycle, SID_CTRL value written)
+        self.sid1_writes = []                # (register, value) taken while the 6809 owns SID1
+
+    def load_read(self, addr):
+        if addr < SID_RAM:
+            return self.ram[addr]
+        if SID_PARAMS <= addr < SID_PARAMS + 8:
+            return self.params[addr - SID_PARAMS]
+        return 0xFF
+
+    def load_write(self, addr, value):
+        if addr < SID_RAM:
+            self.ram[addr] = value
+        elif SID_PARAMS <= addr < SID_PARAMS + 8:
+            self.params[addr - SID_PARAMS] = value
+
+    def read(self, reg, cycles):
+        if SID1 <= reg < SID1_END:
+            return 0x00 if SID1_MIRROR <= reg < SID1_MIRROR + 4 else 0xFF
+        if reg == LADDR_HI:
+            return self.laddr >> 8
+        if reg == LADDR_LO:
+            return self.laddr & 0xFF
+        if reg == LDATA:
+            value = self.load_read(self.laddr)
+            self.laddr = (self.laddr + 1) & 0xFFFF
+            return value
+        if reg == SID_CTRL:
+            return self.ctrl
+        if reg == SID_STATUS:
+            seen = self.run_at is not None and cycles - self.run_at >= SID_FRAME
+            return self.ctrl | (SID_IRQ_SEEN if seen else 0)
+        if reg == SID_SONG:
+            return self.params[4]
+        return 0xFF
+
+    def write(self, reg, value, cycles):
+        if SID1 <= reg < SID1_END:
+            if not self.ctrl & SID_OWNER and reg < SID1_MIRROR:
+                self.sid1_writes.append((reg - SID1, value))
+        elif reg == LADDR_HI:
+            self.laddr = value << 8 | (self.laddr & 0xFF)
+        elif reg == LADDR_LO:
+            self.laddr = (self.laddr & 0xFF00) | value
+        elif reg == LDATA:
+            self.load_write(self.laddr, value)
+            self.laddr = (self.laddr + 1) & 0xFFFF
+        elif reg == SID_CTRL:
+            self.log.append((cycles, value))
+            if self.ctrl & SID_RUN and not value & SID_RUN:
+                self.resets += 1
+            if value & SID_RUN and not self.ctrl & SID_RUN:
+                self.run_at = cycles
+            elif not value & SID_RUN:
+                self.run_at = None
+            self.ctrl = value & (SID_RUN | SID_OWNER)
+        elif reg == SID_SONG:
+            self.params[4] = value
+
+    @property
+    def running(self):
+        return bool(self.ctrl & SID_RUN)
+
+    def ram_bytes(self, addr, n):
+        return bytes(self.ram[addr:addr + n])
 
 
 class Anachron8Board(Anachron8Memory):
-    def __init__(self, cfg, map="v2", dw=None, dw_latency=300, **kwargs):
+    def __init__(self, cfg, map="v2", dw=None, dw_latency=300, sid=True, **kwargs):
         super().__init__(cfg, map=map, **kwargs)
+        self.sid = SidPlayer() if sid and map == "v2" else None
+        self.sid_absent = not sid and map == "v2"
         self.dw = dw                     # a DWServer, or None: nothing answers
         self.dw_latency = dw_latency     # cycles before a server reply shows up
         self.rng = random.Random(0xACE12026)
@@ -94,8 +200,13 @@ class Anachron8Board(Anachron8Memory):
         return bool(self.dw and self.dw.reply) and self.cpu.cycles >= self.dw_ready_at
 
     # --- I/O -------------------------------------------------------------------------------
+    def _sid_reg(self, reg):
+        return self.map == "v2" and (SID1 <= reg < SID1_END or LADDR_HI <= reg < SIDCPU_END)
+
     def _io_read(self, address):
         reg = self._io_v1(address)
+        if self._sid_reg(reg) and (self.sid or self.sid_absent):
+            return self.sid.read(reg, self.cpu.cycles) if self.sid else 0xFF
         if reg == KEY_STATUS:
             return 1 if self.kbd_in != self.kbd_out else 0
         if reg == KEY_DATA:
@@ -124,6 +235,10 @@ class Anachron8Board(Anachron8Memory):
 
     def _io_write(self, address, value):
         reg = self._io_v1(address)
+        if self._sid_reg(reg) and (self.sid or self.sid_absent):
+            if self.sid:
+                self.sid.write(reg, value, self.cpu.cycles)
+            return
         if reg == DW_DATA:
             if self.dw is None:
                 if len(self.dw_tx) < DW_FIFO:

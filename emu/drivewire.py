@@ -22,6 +22,7 @@ import time
 from collections import deque
 from pathlib import Path
 
+OP_NAMEOBJ_MOUNT, OP_NAMEOBJ_CREATE = 0x01, 0x02
 OP_NOP, OP_TIME, OP_INIT, OP_TERM, OP_DWINIT = 0x00, 0x23, 0x49, 0x54, 0x5A
 OP_READEX, OP_REREADEX, OP_WRITE, OP_REWRITE = 0xD2, 0xF2, 0x57, 0x77
 OP_GETSTAT, OP_SETSTAT = 0x47, 0x53
@@ -74,9 +75,14 @@ class DWDrive:
 class DWServer:
     """A DriveWire 4 server subset, fed one byte at a time."""
 
-    def __init__(self, drives=None, clock=None):
+    def __init__(self, drives=None, clock=None, named_dir=None, ignore_unknown=False):
         self.drives = dict(drives or {})     # drive number -> DWDrive
         self.clock = clock                   # callable giving the 6 TIME bytes; None: local time
+        self.named_dir = Path(named_dir) if named_dir is not None else None
+        self.named_drive = None              # the drive of the current named-object lease
+        self.named_ops = []                  # (opcode, name bytes, reply) of each named call
+        self.ignore_unknown = ignore_unknown
+        self.unknown_ops = []                # opcodes dropped with ignore_unknown
         self.reply = deque()                 # bytes for the 6809, in order
         self.ops = []                        # opcodes seen
         self.dwinit_version = None
@@ -152,6 +158,15 @@ class DWServer:
                 if code == SS_COMST:
                     for _ in range(26):
                         yield
+            elif op in (OP_NAMEOBJ_MOUNT, OP_NAMEOBJ_CREATE) and self.named_dir is not None:
+                name = bytearray()
+                for _ in range((yield)):
+                    name.append((yield))
+                drive = self._named(op, bytes(name))
+                self.named_ops.append((op, bytes(name), drive))
+                self.reply.append(drive)
+            elif self.ignore_unknown:
+                self.unknown_ops.append(op)
             else:
                 raise DWProtocolError(f"DriveWire opcode ${op:02X} not implemented")
 
@@ -161,6 +176,38 @@ class DWServer:
         for _ in range(3):
             lsn = lsn << 8 | (yield)
         return drive, lsn
+
+    @staticmethod
+    def plain_name(name):
+        """The file name for a named object, or None if it is not a plain name."""
+        text = name.decode("latin-1")
+        if not text or text in (".", "..") or any(c in "/\\" or ord(c) < 0x20 or ord(c) == 0x7F for c in text):
+            return None
+        return text
+
+    def _named(self, op, name):
+        """MOUNT or CREATE `name`: the drive number, or 0."""
+        if self.named_drive is not None:            # the previous lease ends
+            self.drives.pop(self.named_drive, None)
+            self.named_drive = None
+        text = self.plain_name(name)
+        if text is None:
+            return 0
+        path = self.named_dir / text
+        if op == OP_NAMEOBJ_MOUNT:
+            if not path.is_file():
+                return 0
+        else:
+            try:
+                with open(path, "xb"):
+                    pass
+            except OSError:                          # exists, or cannot be created
+                return 0
+        drive = next((n for n in range(1, 256) if n not in self.drives), 0)
+        if drive:
+            self.attach(drive, path, writeback=True)
+            self.named_drive = drive
+        return drive
 
     def _read(self, drive, lsn):
         if drive not in self.drives:
