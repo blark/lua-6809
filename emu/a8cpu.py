@@ -191,6 +191,15 @@ class A8CPU(CPU):
     def instruction_SYNC(self, opcode):
         self.waiting = "sync"
 
+    def call_instruction_func(self, op_address, opcode):
+        """A $10/$11 prefix before an opcode with no page 2/3 meaning is ignored: the
+        page 1 instruction runs, as on a 6809 and the FPGA core (its ALU8 decode looks
+        at the opcode byte only). cputype relies on it: $10 $4F is CLRD on a 6309 and
+        CLRA on a 6809. The package stopped the emulator there instead."""
+        if opcode > 0xFF and opcode not in self.opcode_dict:
+            opcode &= 0xFF
+        super().call_instruction_func(op_address, opcode)
+
     # --- 16-bit wrap the package misses -----------------------------------------------
     def get_ea_indexed(self):
         """The 5-bit offset form (n,R) returned R + n unmasked: 1,X at X=$FFFF gave $10000."""

@@ -207,6 +207,17 @@ def test_cpu_sex():
     assert m.cpu.accu_d.value == 0x0000 and m.cpu.Z and not m.cpu.N
 
 
+def test_cpu_page_prefix_ignored():
+    """$10/$11 before an opcode with no page 2/3 meaning: the page 1 instruction (cputype)."""
+    m = run_code([0x10, 0x4F, 0x5D], accu_a=0x12, accu_b=0x34, steps=2)   # CLRD on a 6309; TSTB
+    assert m.cpu.accu_a.value == 0 and m.cpu.accu_b.value == 0x34 and not m.cpu.Z
+    assert m.cpu.program_counter.value == 0x1003
+    m = run_code([0x11, 0x5F], accu_b=0x34)                        # $11 $5F: CLRB
+    assert m.cpu.accu_b.value == 0 and m.cpu.program_counter.value == 0x1002
+    m = run_code([0x10, 0x8E, 0x12, 0x34])                         # a real page 2 op: LDY #$1234
+    assert m.cpu.index_y.value == 0x1234
+
+
 def test_cpu_16bit_wrap():
     m = run_code([0xA6, 0x01], index_x=0xFFFF)                     # LDA 1,X at X=$FFFF reads $0000
     m.mem.write_byte(0x0000, 0x11)
