@@ -152,13 +152,14 @@ def test_utf8_cells():
         return
     s = booted()
     make_super(s)
-    # A, e acute (Latin-1), Greek Omega, box drawing, a CJK character (3 bytes)
+    # A, e acute (Latin-1), Greek Omega, box drawing, a CJK character (3 bytes,
+    # double width: U+0000 in its second cell)
     to_w1(s, "41 c3 a9 ce a9 e2 94 80 e4 b8 ad 7e")
-    got = cells(s, 0, range(7))
-    assert [c[0] for c in got] == [0x41, 0xE9, 0x3A9, 0x2500, 0x4E2D, 0x7E, 0x20], got
+    got = cells(s, 0, range(8))
+    assert [c[0] for c in got] == [0x41, 0xE9, 0x3A9, 0x2500, 0x4E2D, 0, 0x7E, 0x20], got
     assert all(c[1:] == (WHITE, BLACK) for c in got)
-    assert s.super_screen(SCREEN1)[0] == "AéΩ─中~"
-    assert s.cursor(SCREEN1) == (6, 0)
+    assert s.super_screen(SCREEN1)[0] == "AéΩ─中 ~"
+    assert s.cursor(SCREEN1) == (7, 0)
     # the high plane holds the high byte, the low plane the low byte
     assert s.peek(SCREEN1, 0x1004)[0] == 0x4E and s.peek(SCREEN1, 0x004)[0] == 0x2D
     assert s.peek(SCREEN1, 0x1001)[0] == 0x00 and s.peek(SCREEN1, 0x001)[0] == 0xE9

@@ -127,6 +127,7 @@ uv run tests/emu/test_os9_boot.py             # boot, dir, scrolling, keys, /T1 
 uv run tests/emu/test_os9_screens.py          # /Term and /W1, screen switching
 uv run tests/emu/test_os9_super.py            # Super screen on /W1 (UTF-8, planes, palette)
 uv run tests/emu/test_os9_utf8_edit.py        # SCF backspace, delete line over UTF-8 input
+uv run tests/emu/test_os9_wide.py             # double-width characters on a Super screen
 ```
 
 ## Getting Started

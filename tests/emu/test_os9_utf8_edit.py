@@ -6,7 +6,8 @@
 """
 SCF line editing with UTF-8 input (the port assembles scf.asm with UTF8=1).
 On /W1 switched to Super the keyboard sends UTF-8; a backspace must take a
-whole code point out of the line buffer and echo one backspace (one cell).
+whole code point out of the line buffer and echo one erase (BS SP BS: one
+cell, or both cells of a double-width character).
 Checks: backspace over 2- and 3-byte characters (the line the program gets,
 byte for byte: echo piped into dump), cursor columns, backspace over ASCII,
 backspace at the start of the line, the delete-line key (backspace over line,
@@ -100,10 +101,11 @@ def test_backspace_multibyte():
     s = booted()
     col0, row = prompt_col(s)
     keys(s, utf8("echo aé中"))
-    assert s.cursor(SCREEN1) == (col0 + 8, row)
+    assert s.cursor(SCREEN1) == (col0 + 9, row)     # 中 is double width
     assert s.super_screen(SCREEN1)[row].endswith("echo aé中")
-    keys(s, BS)                                     # 中 (3 bytes): one cell
+    keys(s, BS)                                     # 中 (3 bytes): its two cells
     assert s.cursor(SCREEN1) == (col0 + 7, row)
+    assert cell_codes(s, row, col0 + 7, 2) == [0x20, 0x20]
     keys(s, BS)                                     # é (2 bytes): one cell
     assert s.cursor(SCREEN1) == (col0 + 6, row)
     assert cell_codes(s, row, col0 + 5, 3) == [ord("a"), 0x20, 0x20]
@@ -159,7 +161,7 @@ def test_delete_line_multibyte():
     s = booted()
     col0, row = prompt_col(s)
     keys(s, utf8("echo é中Ωx"))
-    assert s.cursor(SCREEN1) == (col0 + 9, row)
+    assert s.cursor(SCREEN1) == (col0 + 10, row)    # 中 is double width
     keys(s, DEL_LINE)                               # IT.DLO 0: backspace over the line
     assert s.cursor(SCREEN1) == (col0, row), s.screen_dump(SCREEN1)
     assert cell_codes(s, row, col0, 10) == [0x20] * 10
