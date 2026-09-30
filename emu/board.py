@@ -52,6 +52,28 @@ sid.log records every SID_CTRL write as (cycle, value). sid=False is a
 bitstream without them: all of $FF20-$FF3F and $FFB0-$FFB7 read $FF and
 ignore writes, strict or not.
 
+Map v2 also has the RTC (rtc=True, the default; anachron8 master 6a0172f,
+rtl/rtc.py, docs/IO-REGISTERS.md "RTC"), an unsigned 32-bit count of UTC
+seconds with a 1/256 s fraction that advances with the CPU's cycles (one
+fraction step per 390625 sync cycles, 24414.0625 E cycles):
+
+  $FF58       R: RTC_SEC3, the latched seconds' bits 31-24;
+              W (any value): RTC_LATCH, copy the live clock into the latch
+  $FF59-$FF5B RTC_SEC2..0, bits 23-0 (big-endian)
+  $FF5C       RTC_FRAC, the latched fraction (1/256 s)
+  $FF5D       RTC_STATUS: bit 7 VALID (set since configuration), bits 6-0 0
+  $FF5E/$FF5F RTC_OFFSET: signed minutes east of UTC, big-endian
+
+The eight bytes read the latch (zeros until the first latch), with no side
+effect; writes to $FF59-$FF5F are a BusError when strict (the board ignores
+them). Like the board it counts from 0 (1970, VALID 0) at configuration
+(the board's creation); set_clock() is the ESP32's SPI 0x05 01 (seconds,
+fraction: VALID 1) and 0x05 02 (offset). reset() leaves it running: only
+configuration resets it. rtc=False is a bitstream without it (anachron8
+before c01d4a6): $FF58-$FF5F read $FF and ignore writes, strict or not, as
+a free I/O address on the board; RTC_STATUS then reads $FF, whose bits 6-0
+tell it apart from the RTC's.
+
 A write to one of the read-only registers is a BusError when strict (the
 board ignores it). push_key() queues a key the way the ESP32 does (False
 when the FIFO is full: the key is dropped). reset() is the CPU reset: the
@@ -80,6 +102,9 @@ STATUS_OWNER2 = 0x10
 SID_RAM, SID_PARAMS = 0x8000, 0xDF00
 SID_FRAME = E_HZ // 50                   # CPU cycles in the player's 50 Hz frame
 SID_RESET_PULSE = E_HZ * 35 // 1_000_000  # CPU cycles of the SID reset pulse (35 us)
+RTC, RTC_END = 0x58, 0x60                 # $FF58-$FF5F; a write to $FF58 latches
+RTC_VALID = 0x80
+RTC_PRESCALE = 100_000_000 // 256         # sync cycles per 1/256 s
 
 
 class SidPlayer:
@@ -181,11 +206,50 @@ class SidPlayer:
         return bytes(self.ram[addr:addr + n])
 
 
+class Rtc:
+    """The RTC as the 6809 sees it (rtl/rtc.py): the live clock from the CPU's
+    cycle count since the last set, a latch the registers read."""
+
+    def __init__(self):
+        self.base = 0                    # the clock in 1/256 s at cycle `since`
+        self.since = 0
+        self.valid = False
+        self.offset = 0                  # minutes east of UTC, -32768..32767
+        self.latch = bytes(8)
+        self.latches = 0                 # writes to $FF58
+
+    def now(self, cycles):
+        """The live clock in 1/256 s (32.8 bits, wrapping as the counter does)."""
+        steps = (cycles - self.since) * SYNC_PER_E // RTC_PRESCALE
+        return (self.base + steps) & 0xFF_FFFF_FFFF
+
+    def set(self, seconds, cycles, frac=0):
+        """SPI 0x05 01: seconds (UTC since 1970) and fraction; VALID = 1."""
+        self.base = (seconds & 0xFFFF_FFFF) << 8 | frac & 0xFF
+        self.since = cycles
+        self.valid = True
+
+    def read(self, reg):
+        return self.latch[reg - RTC]
+
+    def write(self, reg, value, cycles):
+        """False for a register that ignores writes (all but $FF58)."""
+        if reg != RTC:
+            return False
+        t = self.now(cycles)
+        self.latch = ((t >> 8).to_bytes(4, "big") + bytes([t & 0xFF, RTC_VALID if self.valid else 0])
+                      + (self.offset & 0xFFFF).to_bytes(2, "big"))
+        self.latches += 1
+        return True
+
+
 class Anachron8Board(Anachron8Memory):
-    def __init__(self, cfg, map="v2", dw=None, dw_latency=300, sid=True, sids=2, **kwargs):
+    def __init__(self, cfg, map="v2", dw=None, dw_latency=300, sid=True, sids=2, rtc=True, **kwargs):
         super().__init__(cfg, map=map, **kwargs)
         self.sid = SidPlayer(sids) if sid and map == "v2" else None
         self.sid_absent = not sid and map == "v2"
+        self.rtc = Rtc() if rtc and map == "v2" else None
+        self.rtc_absent = not rtc and map == "v2"
         self.dw = dw                     # a DWServer, or None: nothing answers
         self.dw_latency = dw_latency     # cycles before a server reply shows up
         self.rng = random.Random(0xACE12026)
@@ -203,6 +267,16 @@ class Anachron8Board(Anachron8Memory):
         self.dw_ready_at = 0
         if self.dw:
             self.dw.reply.clear()
+
+    def set_clock(self, seconds=None, offset=None, frac=0):
+        """The ESP32's SPI 0x05: 01 sets seconds (and frac, 1/256 s) and VALID,
+        02 the offset (signed minutes east of UTC); None leaves either as is."""
+        cycles = self.cpu.cycles if self.cpu else 0
+        if seconds is not None:
+            self.rtc.set(seconds, cycles, frac)
+        if offset is not None:
+            assert -0x8000 <= offset < 0x8000, offset
+            self.rtc.offset = offset
 
     # --- the timer and the IRQ line ------------------------------------------------
     def advance(self, cycles):
@@ -242,10 +316,15 @@ class Anachron8Board(Anachron8Memory):
         return self.map == "v2" and (SID1 <= reg < SID1_END or SID2 <= reg < SID2_END
                                      or LADDR_HI <= reg < SIDCPU_END)
 
+    def _rtc_reg(self, reg):
+        return self.map == "v2" and RTC <= reg < RTC_END and (self.rtc or self.rtc_absent)
+
     def _io_read(self, address):
         reg = self._io_v1(address)
         if self._sid_reg(reg) and (self.sid or self.sid_absent):
             return self.sid.read(reg, self.cpu.cycles) if self.sid else 0xFF
+        if self._rtc_reg(reg):
+            return self.rtc.read(reg) if self.rtc else 0xFF
         if reg == KEY_STATUS:
             return 1 if self.kbd_in != self.kbd_out else 0
         if reg == KEY_DATA:
@@ -276,6 +355,10 @@ class Anachron8Board(Anachron8Memory):
         reg = self._io_v1(address)
         if self._sid_reg(reg) and (self.sid or self.sid_absent):
             if self.sid and not self.sid.write(reg, value, self.cpu.cycles) and self.strict:
+                raise BusError(f"write ${value:02X} to read-only register ${address:04X}")
+            return
+        if self._rtc_reg(reg):
+            if self.rtc and not self.rtc.write(reg, value, self.cpu.cycles) and self.strict:
                 raise BusError(f"write ${value:02X} to read-only register ${address:04X}")
             return
         if reg == DW_DATA:

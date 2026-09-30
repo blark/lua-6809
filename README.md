@@ -111,6 +111,7 @@ files). `--no-strict` gives the board's behaviour instead of bus errors
 uv run emu/a8run.py --raw rom.bin@FE --drive 0=nos9.dsk -n 5000000 --trace 64
 uv run tests/emu/test_os9_devices.py
 uv run tests/emu/test_named_sid.py            # DriveWire named objects, the SID player's registers
+uv run tests/emu/test_rtc.py                  # the RTC ($FF58-$FF5F): latch, VALID, offset, absent
 ```
 
 The DriveWire server also serves DriveWire 4 named objects as anachronsole
