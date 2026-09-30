@@ -6,13 +6,10 @@
 """
 BASIC09 on NitrOS-9 (the anachron8 port) on the emulated Anachron8.
 
-BASIC09 is behind a recipe switch that is off by default (BASIC09 in
-recipes/anachron8/anachron8.mak): the dw recipe's disk has none of it, and
-recipes/anachron8/dw_basic09 builds the same system with it. These tests
-check both disks, then boot the BASIC09 one:
-  - the switch: the default disk has no BASIC09 modules, samples or help;
-    the BASIC09 disk has basic09, runb, inkey, syscall, the samples and
-    their help; kernel and OS9Boot are the same on both
+BASIC09 is on the default disk (the dw recipe; Picard's decision
+2026-09-30). These tests check the disk, then boot it:
+  - the disk: basic09, runb, inkey, syscall in CMDS, the samples in
+    /DD/BASIC09 and their help entries
   - the modules: BASIC09 and RunB edition 22, RunB byte-identical to the
     nitros9-languages build other recipes pin (sha256)
   - a procedure file typed in with `build`, loaded and run non-interactively
@@ -26,8 +23,8 @@ check both disks, then boot the BASIC09 one:
     uv run tests/emu/test_os9_basic09.py [--transcript]
 
 --transcript prints an interactive BASIC09 session (banner, a direct
-command, a procedure run, bye). Needs both recipes built in
-~/src/nitros9/recipes/anachron8 (dw, and dw_basic09); skipped when missing.
+command, a procedure run, bye). Needs the dw recipe built in
+~/src/nitros9/recipes/anachron8; skipped when missing.
 """
 
 import hashlib
@@ -41,8 +38,7 @@ sys.path.insert(0, str(HERE))
 from emu.os9boot import DISK, KERNEL, KERNEL_JSON, RECIPE, SCREEN0, OS9Session  # noqa: E402
 from test_os9_ls import Disk  # noqa: E402
 
-B09 = RECIPE.parent / "dw_basic09"
-B09_KERNEL, B09_JSON, B09_DISK = B09 / "kernel", B09 / "kernel.json", B09 / "l2_anachron8_dw_basic09.dsk"
+B09_KERNEL, B09_JSON, B09_DISK = KERNEL, KERNEL_JSON, DISK
 BOOT_LIMIT = 10_000_000
 STEP = 200_000_000
 KEY_STEP = 20_000_000
@@ -98,13 +94,13 @@ _session = None
 
 
 def built():
-    return all(p.exists() for p in (KERNEL, KERNEL_JSON, DISK, B09_KERNEL, B09_JSON, B09_DISK))
+    return all(p.exists() for p in (KERNEL, KERNEL_JSON, DISK))
 
 
 SKIPPED = []
 
 
-def skip(name, why="no NitrOS-9 build (dw and dw_basic09)"):
+def skip(name, why="no NitrOS-9 build (recipes/anachron8/dw)"):
     SKIPPED.append(name)
     print(f"skip  {name}: {why}")
 
@@ -175,25 +171,15 @@ def helpmsg(disk):
 
 
 # --- the disks -------------------------------------------------------------------------
-def test_switch_off_by_default():
+def test_on_default_disk():
     if not built():
-        return skip("test_switch_off_by_default")
-    plain, b09 = Disk(DISK), Disk(B09_DISK)
-    cmds = names(plain, "/dd/CMDS")
-    assert not cmds & set(B09_CMDS), cmds & set(B09_CMDS)
-    assert "BASIC09" not in names(plain, "/dd")
-    help_plain = helpmsg(plain)
+        return skip("test_on_default_disk")
+    d = Disk(DISK)
+    assert set(B09_CMDS) <= names(d, "/dd/CMDS"), names(d, "/dd/CMDS")
+    assert names(d, "/dd/BASIC09") == set(SAMPLES)
+    help_text = helpmsg(d)
     for topic in (b"@BASIC09", b"@RUNB", b"@INKEY"):
-        assert topic not in help_plain, topic
-    assert set(B09_CMDS) <= names(b09, "/dd/CMDS")
-    assert names(b09, "/dd/BASIC09") == set(SAMPLES)
-    help_b09 = helpmsg(b09)
-    for topic in (b"@BASIC09", b"@RUNB", b"@INKEY"):
-        assert topic in help_b09, topic
-    # the switch adds files only: CMDS otherwise equal, same kernel and OS9Boot
-    assert names(b09, "/dd/CMDS") - set(B09_CMDS) == cmds
-    assert B09_KERNEL.read_bytes() == KERNEL.read_bytes()
-    assert (B09 / "bootfile").read_bytes() == (RECIPE / "bootfile").read_bytes()
+        assert topic in help_text, topic
 
 
 def test_modules():

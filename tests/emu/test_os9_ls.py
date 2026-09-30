@@ -354,7 +354,7 @@ def test_grid_classic():
 
 
 def test_dirs_first_sorted():
-    """/dd: SYS and CMDS directories before the files, names case-insensitive."""
+    """/dd: the BASIC09, CMDS and SYS directories before the files, names case-insensitive."""
     if not built():
         return
     s = booted()
@@ -363,8 +363,8 @@ def test_dirs_first_sorted():
     run(s, "echo x >/dd/afile")
     ents = listing(disk(s), "/dd")
     names = [e["name"] for e in ents]
-    assert names[:3] == ["aDir", "CMDS", "SYS"], names
-    assert names[3:5] == ["afile", "Bfile"], names
+    assert names[:4] == ["aDir", "BASIC09", "CMDS", "SYS"], names
+    assert names[4:6] == ["afile", "Bfile"], names
     out = grid(Out(CLASSIC), ents)
     on_classic(s, "ls /dd")
     check_screen(s, SCREEN0, out)
@@ -456,7 +456,7 @@ def test_tree_classic():
     assert any(r[:1] == [("\u2502", FG)] for r in rows)
     full = on_serial(s, "ls --tree /dd")
     assert full == tree(Out(SERIAL), d, "/dd").data()
-    assert full.startswith("\x1b[1;34m/dd\x1b[0m\r|-- \x1b[1;34mCMDS\x1b[0m/\r|   |-- ")
+    assert full.startswith("\x1b[1;34m/dd\x1b[0m\r|-- \x1b[1;34mBASIC09\x1b[0m/\r|   |-- ")
 
 
 def test_tree_nested_and_depth():
