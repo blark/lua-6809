@@ -196,11 +196,13 @@ The Lua source is patched, not forked. To modify:
 
 ### gcc6809 Workarounds
 
-The gcc6809 cross-compiler has bugs that required workarounds:
+The gcc6809 cross-compiler had bugs that required workarounds:
 
-1. **Indirect call offset bug** - After pushing to stack, indirect calls use the wrong offset. Fixed by copying function pointers to local variables before calls.
+1. **Indirect call offset bug** - After pushing to stack, indirect calls used the wrong offset. Worked around by copying function pointers to local variables before calls (`ldo.c`, `lmem.c`, `lstate.c`, `lzio.c`); fixed in [gcc6809-nix](https://github.com/blark/gcc6809-nix) (indirect-call-stack-offset.patch), so the copies are no longer needed.
 
 2. **32-bit multiply bug** - Patched in [gcc6809-nix](https://github.com/blark/gcc6809-nix).
+
+3. **Swapped halves of 32-bit arguments** - A `long` pushed as an argument had its two words swapped, so `luai_ipow(2, 10)` (`a ^ b` with variables) returned 0. Fixed in gcc6809-nix (movsi-fix.patch); `tests/lua/arithmetic/pow_*.lua` cover it.
 
 ### Toolchain
 

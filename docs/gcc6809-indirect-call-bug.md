@@ -1,5 +1,9 @@
 # gcc6809 Indirect Call Stack Offset Bug
 
+**Fixed** in gcc6809-nix by `patches/indirect-call-stack-offset.patch` (reload left the
+function pointer's spill slot at its function-entry offset). The workarounds below are
+no longer needed with that compiler.
+
 ## Summary
 
 gcc6809 (GCC 4.3.6 port for Motorola 6809) generates incorrect code when calling through a function pointer that is accessed via a stack-relative offset, when there are push operations between loading the function pointer address and the call.
