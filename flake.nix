@@ -34,8 +34,10 @@
       perSystem =
         system:
         let
-          # The emulator's Python comes from the toolchain's nixpkgs, like
-          # gcc6809-nix's and anachron8-sw's; unstable is for uv and nixfmt.
+          # The Python env is built from nixpkgs (nixos-24.05 via gcc6809), not
+          # unstable: unstable's python wrapper (--inherit-argv0 only) drops the
+          # env's site-packages when `python3` is found via PATH on Darwin.
+          # Unstable is only for uv and nixfmt.
           pkgs = import nixpkgs {
             inherit system;
             overlays = [ anachron8-emu.overlays.default ];
@@ -138,7 +140,6 @@
             echo "Done. Run 'direnv reload' to rebuild."
           '';
 
-          mc6809 = pkgs.python3Packages.mc6809;
           pythonEnv = pkgs.python3.withPackages (ps: [ ps.anachron8-emu ]);
 
         in
@@ -153,7 +154,6 @@
             lua6809-vm-a8
             luac6809
             regen-patch
-            mc6809
             pythonEnv
             toolchain
             ;
