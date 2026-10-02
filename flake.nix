@@ -2,7 +2,10 @@
   description = "Lua 5.1 for the MC6809";
 
   inputs = {
-    gcc6809.url = "github:blark/gcc6809-nix";
+    gcc6809 = {
+      url = "github:blark/gcc6809-nix";
+      inputs.anachron8-emu.follows = "anachron8-emu";
+    };
     nixpkgs.follows = "gcc6809/nixpkgs";
     nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     anachron8-emu = {

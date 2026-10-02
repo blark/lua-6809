@@ -42,14 +42,17 @@
     },
     "gcc6809": {
       "inputs": {
+        "anachron8-emu": [
+          "anachron8-emu"
+        ],
         "nixpkgs": "nixpkgs"
       },
       "locked": {
-        "lastModified": 1767191352,
-        "narHash": "sha256-dp051/rgOTt2Kyva2eaOPusOenFIRdwc9kI8IC9MjpA=",
+        "lastModified": 1790941234,
+        "narHash": "sha256-a03oeqTHSPGIKyoN/FlTCmD5kEO2gfXz9Q85jAyRmTQ=",
         "owner": "blark",
         "repo": "gcc6809-nix",
-        "rev": "8bd08dce7ad670161a135f50a6a1f8506ba34d8c",
+        "rev": "1e01ee3f58a41a4bf3137f9c42ae092ec4190434",
         "type": "github"
       },
       "original": {
