@@ -4,7 +4,7 @@ Wrap 6809 Lua bytecode (from luac6809) in an S19 record file for the
 Anachron8, so MON09's L command can load it next to lua-a8.s19.
 
 The VM expects a big-endian 16-bit length at A8_BYTECODE_SIZE_ADDR followed
-by the bytecode (config/anachron8.py).
+by the bytecode (emu.config.anachron8 in anachron8-emu).
 
 Usage: tools/bytecode_s19.py script.luac [-o script.s19]
 """
@@ -13,8 +13,7 @@ import argparse
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from config.anachron8 import A8_BYTECODE_SIZE_ADDR, A8_BYTECODE_MAX_SIZE
+from emu.config.anachron8 import A8_BYTECODE_SIZE_ADDR, A8_BYTECODE_MAX_SIZE
 
 RECORD_BYTES = 16
 
