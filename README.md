@@ -91,7 +91,7 @@ SWI to its RAM vector at `$DF60`, which is `0000` after reset.)
 
 ```bash
 nix build .#vm-a8          # result/lua-a8.s19 (+ lua-a8.map)
-nix run .#test-a8          # test suite on the Anachron8 memory model (emu/anachron8.py)
+nix run .#test-a8          # test suite on anachron8-emu's Anachron8 memory model
 luac6809 -o prog.luac prog.lua && tools/bytecode_s19.py prog.luac   # prog.s19 at $D000
 ```
 
@@ -125,10 +125,10 @@ direnv allow
 luac6809 -o test.luac script.lua
 
 # Run in emulator (verbose output)
-uv run emu/harness.py test.luac
+python -m emu.harness test.luac
 
-# Run in TUI emulator
-uv run emu/visual.py
+# Optional TUI: install the visual extra as described in anachron8-emu's README
+python -m emu.visual
 ```
 
 ![TUI Emulator](docs/TUI.png)
@@ -149,7 +149,7 @@ The Lua source is patched, not forked. To modify:
 | `lua-work/src/luaconf.h` | Platform configuration |
 | `patches/6809-phase1.patch` | All modifications to Lua source |
 | `tools/luac_convert.py` | Bytecode endianness converter |
-| `emu/runner.py` | Test harness for MC6809 emulator |
+| `run_tests.py` | Lua tests using the installed `emu.runner` package |
 
 ## Technical Details
 
@@ -175,7 +175,7 @@ The gcc6809 cross-compiler has bugs that required workarounds:
 
 - [gcc6809](https://github.com/blark/gcc6809-nix) - GCC 4.3.6 cross-compiler
 - [newlib](https://sourceware.org/newlib/) - C library (setjmp, memcpy, etc.)
-- [MC6809](https://pypi.org/project/MC6809/) - Python emulator for testing
+- [anachron8-emu](https://git.sherwood.haus/blark/anachron8-emu) - machine emulator and corrected MC6809 CPU, installed by this flake
 
 ## License
 

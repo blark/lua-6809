@@ -60,11 +60,10 @@ def compile_lua(lua_file: Path, output_file: Path) -> tuple[bool, str]:
 def run_emulator(luac_file: Path, timeout: int = 60) -> tuple[bool, str, str]:
     """Run bytecode in MC6809 emulator, return (success, output, error)"""
     script_dir = Path(__file__).parent
-    test_script = script_dir / 'emu' / 'runner.py'
 
     try:
         result = subprocess.run(
-            [sys.executable, str(test_script), str(luac_file)],
+            [sys.executable, '-m', 'emu.runner', str(luac_file)],
             capture_output=True,
             text=True,
             timeout=timeout,

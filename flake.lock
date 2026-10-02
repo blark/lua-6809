@@ -1,5 +1,46 @@
 {
   "nodes": {
+    "anachron8-emu": {
+      "inputs": {
+        "anachronsole": "anachronsole",
+        "nitros9": "nitros9",
+        "nitros9-languages": "nitros9-languages",
+        "nixpkgs": [
+          "nixpkgs-unstable"
+        ]
+      },
+      "locked": {
+        "lastModified": 1790911769,
+        "narHash": "sha256-GsIJOvu6mieQlVSvJQA7IzbRmWQKqAN4inSl8X3RlPE=",
+        "ref": "extract/package",
+        "rev": "43eb971f895d79b8618c15573e4aa6792f8a16f3",
+        "revCount": 32,
+        "type": "git",
+        "url": "https://git.sherwood.haus/blark/anachron8-emu.git"
+      },
+      "original": {
+        "ref": "extract/package",
+        "type": "git",
+        "url": "https://git.sherwood.haus/blark/anachron8-emu.git"
+      }
+    },
+    "anachronsole": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1790902549,
+        "narHash": "sha256-clVJuPp4Mp9OU/UJW+ZakOgt824hgOWBeZOWoXRTrPU=",
+        "ref": "refs/heads/main",
+        "rev": "89911c8a9c97f45e041913a5567ef8a280498343",
+        "revCount": 336,
+        "type": "git",
+        "url": "https://git.sherwood.haus/blark/anachronsole.git"
+      },
+      "original": {
+        "rev": "89911c8a9c97f45e041913a5567ef8a280498343",
+        "type": "git",
+        "url": "https://git.sherwood.haus/blark/anachronsole.git"
+      }
+    },
     "gcc6809": {
       "inputs": {
         "nixpkgs": "nixpkgs"
@@ -15,6 +56,49 @@
       "original": {
         "owner": "blark",
         "repo": "gcc6809-nix",
+        "type": "github"
+      }
+    },
+    "nitros9": {
+      "inputs": {
+        "nitros9-languages": [
+          "anachron8-emu",
+          "nitros9-languages"
+        ],
+        "nixpkgs": [
+          "anachron8-emu",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1790766389,
+        "narHash": "sha256-VJtlU28+3NeaE/ywPUlvvJj9EOCcSNIeHQJ6GJFW4mc=",
+        "ref": "anachron8",
+        "rev": "625cc38c3233e4b47e3ac7d0974c59f294f92283",
+        "revCount": 4167,
+        "type": "git",
+        "url": "https://git.sherwood.haus/blark/nitros9.git"
+      },
+      "original": {
+        "ref": "anachron8",
+        "type": "git",
+        "url": "https://git.sherwood.haus/blark/nitros9.git"
+      }
+    },
+    "nitros9-languages": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1787884497,
+        "narHash": "sha256-KPt34d8fNXPrRm4k28BWpYwHlv+bXuOjnLNhgP0u/H4=",
+        "owner": "nitros9project",
+        "repo": "nitros9-languages",
+        "rev": "c05f23c3ea4f934c54b185035e98eae34e73565b",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nitros9project",
+        "repo": "nitros9-languages",
+        "rev": "c05f23c3ea4f934c54b185035e98eae34e73565b",
         "type": "github"
       }
     },
@@ -52,6 +136,7 @@
     },
     "root": {
       "inputs": {
+        "anachron8-emu": "anachron8-emu",
         "gcc6809": "gcc6809",
         "nixpkgs": [
           "gcc6809",

@@ -5,18 +5,37 @@
     gcc6809.url = "github:blark/gcc6809-nix";
     nixpkgs.follows = "gcc6809/nixpkgs";
     nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    anachron8-emu = {
+      url = "git+https://git.sherwood.haus/blark/anachron8-emu.git?ref=extract/package";
+      inputs.nixpkgs.follows = "nixpkgs-unstable";
+    };
   };
 
-  outputs = { self, nixpkgs, gcc6809, nixpkgs-unstable, ... }:
+  outputs =
+    {
+      self,
+      nixpkgs,
+      gcc6809,
+      nixpkgs-unstable,
+      anachron8-emu,
+      ...
+    }:
     let
-      systems = [ "x86_64-linux" "aarch64-darwin" ];
+      systems = [
+        "x86_64-linux"
+        "aarch64-darwin"
+      ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
 
       # Shared derivations per system
-      perSystem = system:
+      perSystem =
+        system:
         let
           pkgs = import nixpkgs { inherit system; };
-          pkgsUnstable = import nixpkgs-unstable { inherit system; };
+          pkgsUnstable = import nixpkgs-unstable {
+            inherit system;
+            overlays = [ anachron8-emu.overlays.default ];
+          };
           toolchain = gcc6809.packages.${system}.default;
 
           luaOriginal = pkgs.fetchzip {
@@ -47,9 +66,15 @@
             pname = "lua6809-vm";
             version = "5.1.5";
             src = luaSrc;
-            nativeBuildInputs = [ toolchain pkgs.gnumake ];
+            nativeBuildInputs = [
+              toolchain
+              pkgs.gnumake
+            ];
             postUnpack = "cp $sourceRoot/Makefile.6809 $sourceRoot/src/Makefile";
-            buildFlags = [ "-C" "src" ];
+            buildFlags = [
+              "-C"
+              "src"
+            ];
             preBuild = ''
               export CC=m6809-unknown-none-gcc
               export CFLAGS="-DLUA_USE_6809 -DLUA_CORE -I. -I${toolchain}/m6809-unknown-none/include -Os"
@@ -59,7 +84,10 @@
             meta = {
               description = "Lua 5.1 VM for MC6809 processor";
               license = pkgs.lib.licenses.mit;
-              platforms = [ "x86_64-linux" "aarch64-darwin" ];
+              platforms = [
+                "x86_64-linux"
+                "aarch64-darwin"
+              ];
             };
           };
 
@@ -67,9 +95,15 @@
           # MON09 ROM at $E000); see config/memory_layout.py.
           lua6809-vm-a8 = lua6809-vm.overrideAttrs (old: {
             pname = "lua6809-vm-a8";
-            buildFlags = [ "-C" "src" "TARGET=a8" ];
+            buildFlags = [
+              "-C"
+              "src"
+              "TARGET=a8"
+            ];
             installPhase = "mkdir -p $out && cp src/lua-a8.s19 src/lua-a8.map $out/";
-            meta = old.meta // { description = "Lua 5.1 VM for the Anachron8 6809 computer"; };
+            meta = old.meta // {
+              description = "Lua 5.1 VM for the Anachron8 6809 computer";
+            };
           });
 
           luac6809 = pkgs.writeShellScriptBin "luac6809" ''
@@ -99,64 +133,64 @@
             echo "Done. Run 'direnv reload' to rebuild."
           '';
 
-          mc6809 = pkgsUnstable.python3Packages.buildPythonPackage rec {
-            pname = "MC6809";
-            version = "0.6.0";
-            src = pkgsUnstable.fetchPypi {
-              inherit pname version;
-              sha256 = "sha256-Q5DNA+RmMmSR2I33WLIsVWyZJpknWBK820dL41Bgd74=";
-            };
-            pyproject = true;
-            build-system = [ pkgsUnstable.python3Packages.poetry-core ];
-            dependencies = [ pkgsUnstable.python3Packages.click ];
-            postPatch = ''
-              substituteInPlace pyproject.toml \
-                --replace-fail 'poetry.masonry.api' 'poetry.core.masonry.api' \
-                --replace-fail 'poetry>=0.12' 'poetry-core>=1.0.0'
-            '';
-            doCheck = false;
-            dontCheckRuntimeDeps = true;
-            meta = {
-              description = "MC6809 CPU emulator written in Python";
-              license = pkgsUnstable.lib.licenses.gpl3;
-              platforms = pkgsUnstable.lib.platforms.unix;
-            };
-          };
+          mc6809 = pkgsUnstable.python3Packages.mc6809;
+          pythonEnv = pkgsUnstable.python3.withPackages (ps: [ ps.anachron8-emu ]);
 
-          pythonEnv = pkgsUnstable.python3.withPackages (_: [ mc6809 ]);
-
-        in {
-          inherit pkgs pkgsUnstable luaOriginal luaSrc luac-int32 lua6809-vm
-                  lua6809-vm-a8 luac6809 regen-patch mc6809 pythonEnv toolchain;
+        in
+        {
+          inherit
+            pkgs
+            pkgsUnstable
+            luaOriginal
+            luaSrc
+            luac-int32
+            lua6809-vm
+            lua6809-vm-a8
+            luac6809
+            regen-patch
+            mc6809
+            pythonEnv
+            toolchain
+            ;
         };
 
       # Cache perSystem results to avoid redundant evaluation
       cached = forAllSystems perSystem;
 
-    in {
-      packages = forAllSystems (system:
-        let s = cached.${system}; in {
+    in
+    {
+      packages = forAllSystems (
+        system:
+        let
+          s = cached.${system};
+        in
+        {
           default = s.lua6809-vm;
           lua-original = s.luaOriginal;
           vm = s.lua6809-vm;
           vm-a8 = s.lua6809-vm-a8;
           luac = s.luac6809;
-        });
+        }
+      );
 
-      apps = forAllSystems (system:
+      apps = forAllSystems (
+        system:
         let
           s = cached.${system};
-          mkTest = name: vm: target: s.pkgs.writeShellScriptBin name ''
-            export LUA6809_S19="${vm}"
-            export LUA6809_TARGET="${target}"
-            export PYTHONPATH="${s.pythonEnv}/${s.pythonEnv.sitePackages}:$PYTHONPATH"
-            export PATH="${s.luac6809}/bin:$PATH"
-            cd ${./.}
-            ${s.pythonEnv}/bin/python3 ./run_tests.py "$@"
-          '';
+          mkTest =
+            name: vm: target:
+            s.pkgs.writeShellScriptBin name ''
+              export LUA6809_S19="${vm}"
+              export LUA6809_TARGET="${target}"
+              export PYTHONPATH="${s.pythonEnv}/${s.pythonEnv.sitePackages}:$PYTHONPATH"
+              export PATH="${s.luac6809}/bin:$PATH"
+              cd ${./.}
+              ${s.pythonEnv}/bin/python3 ./run_tests.py "$@"
+            '';
           testScript = mkTest "lua6809-test" "${s.lua6809-vm}/lua.s19" "sim";
           testA8Script = mkTest "lua6809-test-a8" "${s.lua6809-vm-a8}/lua-a8.s19" "anachron8";
-        in {
+        in
+        {
           test = {
             type = "app";
             program = "${testScript}/bin/lua6809-test";
@@ -167,10 +201,17 @@
             program = "${testA8Script}/bin/lua6809-test-a8";
             meta.description = "Run the test suite on the Anachron8 build and memory model";
           };
-        });
+        }
+      );
 
-      devShells = forAllSystems (system:
-        let s = cached.${system}; in {
+      formatter = forAllSystems (system: cached.${system}.pkgsUnstable.nixfmt-rfc-style);
+
+      devShells = forAllSystems (
+        system:
+        let
+          s = cached.${system};
+        in
+        {
           default = s.pkgs.mkShell {
             packages = [
               s.toolchain
@@ -180,7 +221,7 @@
               s.regen-patch
               s.lua6809-vm
               s.pkgsUnstable.uv
-              s.pkgsUnstable.python3
+              s.pythonEnv
               s.pkgs.srecord
             ];
             LUA_ORIGINAL_DIR = "${s.luaOriginal}";
@@ -197,6 +238,7 @@
               echo "Workflow: Edit lua-work/ -> regen-patch -> direnv reload"
             '';
           };
-        });
+        }
+      );
     };
 }
