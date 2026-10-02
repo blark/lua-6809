@@ -1,24 +1,16 @@
-#!/usr/bin/env -S uv run
-# /// script
-# requires-python = ">=3.9"
-# dependencies = ["MC6809"]
-# ///
+#!/usr/bin/env python3
 """
 Test harness for running Lua VM on MC6809 emulator
 
-Run with: uv run test_lua_6809.py [bytecode.luac]
-Or make executable: chmod +x test_lua_6809.py && ./test_lua_6809.py
+Run with: python tools/harness.py [bytecode.luac]
 """
 
 import sys
 from pathlib import Path
 
-# Add project root to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from MC6809.components.cpu6809 import CPU
 
-from config.memory_layout import (
+from emu.config.memory_layout import (
     BYTECODE_SIZE_ADDR, BYTECODE_DATA_ADDR,
     HEAP_START, HEAP_END,
     OUTPUT_ADDR, STACK_TOP, STACK_BOTTOM,

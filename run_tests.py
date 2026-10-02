@@ -63,7 +63,7 @@ def run_emulator(luac_file: Path, timeout: int = 60) -> tuple[bool, str, str]:
 
     try:
         result = subprocess.run(
-            [sys.executable, '-m', 'emu.runner', str(luac_file)],
+            [sys.executable, str(script_dir / 'tools' / 'runner.py'), str(luac_file)],
             capture_output=True,
             text=True,
             timeout=timeout,

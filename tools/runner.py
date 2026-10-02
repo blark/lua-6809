@@ -1,25 +1,18 @@
-#!/usr/bin/env -S uv run
-# /// script
-# requires-python = ">=3.9"
-# dependencies = ["MC6809"]
-# ///
+#!/usr/bin/env python3
 """
 Minimal test runner for Lua 6809 VM.
 Outputs only the result value or error message.
 
-Usage: uv run test_runner.py <bytecode.luac>
+Usage: python tools/runner.py <bytecode.luac>
 """
 
 import os
 import sys
 from pathlib import Path
 
-# Add project root to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from MC6809.components.cpu6809 import CPU
 
-from config.memory_layout import (
+from emu.config.memory_layout import (
     BYTECODE_SIZE_ADDR, BYTECODE_DATA_ADDR,
     STACK_TOP, Lua6809Config, Memory64K,
     A8_BYTECODE_SIZE_ADDR, A8_BYTECODE_DATA_ADDR, A8_BYTECODE_MAX_SIZE,

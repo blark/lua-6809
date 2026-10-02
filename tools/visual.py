@@ -1,26 +1,14 @@
-#!/usr/bin/env -S uv run
-# /// script
-# requires-python = ">=3.9"
-# dependencies = [
-#   "MC6809",
-#   "textual",
-#   "tree-sitter",
-#   "tree-sitter-lua",
-# ]
-# ///
+#!/usr/bin/env python3
 """
 Visual emulator for Lua VM on MC6809 using Textual TUI.
 
-Usage: uv run test_lua_6809_visual.py [bytecode.luac]
+Usage: python tools/visual.py [bytecode.luac]
 """
 
 import os
 import subprocess
 import sys
 from pathlib import Path
-
-# Add project root to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
@@ -32,7 +20,7 @@ import tree_sitter_lua
 
 from MC6809.components.cpu6809 import CPU
 
-from config.memory_layout import (
+from emu.config.memory_layout import (
     BYTECODE_SIZE_ADDR, BYTECODE_DATA_ADDR, BYTECODE_MAX_SIZE,
     HEAP_START, HEAP_END, OUTPUT_ADDR, STACK_BOTTOM, STACK_TOP,
     Lua6809Config, Memory64K

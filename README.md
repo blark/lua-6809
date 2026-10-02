@@ -125,10 +125,10 @@ direnv allow
 luac6809 -o test.luac script.lua
 
 # Run in emulator (verbose output)
-python -m emu.harness test.luac
+python tools/harness.py test.luac
 
-# Optional TUI: install the visual extra as described in anachron8-emu's README
-python -m emu.visual
+# Optional TUI; needs textual, tree-sitter and tree-sitter-lua in the Python environment
+python tools/visual.py
 ```
 
 ![TUI Emulator](docs/TUI.png)
@@ -149,7 +149,8 @@ The Lua source is patched, not forked. To modify:
 | `lua-work/src/luaconf.h` | Platform configuration |
 | `patches/6809-phase1.patch` | All modifications to Lua source |
 | `tools/luac_convert.py` | Bytecode endianness converter |
-| `run_tests.py` | Lua tests using the installed `emu.runner` package |
+| `run_tests.py` | Lua tests, each run in the emulator by `tools/runner.py` |
+| `tools/runner.py`, `harness.py`, `trace.py`, `visual.py` | Run bytecode on the installed `anachron8-emu` machine model: result only, verbose, with a CPU trace, Textual TUI |
 
 ## Technical Details
 

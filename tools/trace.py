@@ -1,12 +1,8 @@
-#!/usr/bin/env -S uv run
-# /// script
-# requires-python = ">=3.9"
-# dependencies = ["MC6809"]
-# ///
+#!/usr/bin/env python3
 """
 Test harness for running Lua VM on MC6809 emulator (with tracing)
 
-Run with: uv run test_trace.py
+Run with: python tools/trace.py
 """
 
 import array
