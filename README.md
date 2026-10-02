@@ -150,7 +150,7 @@ The Lua source is patched, not forked. To modify:
 | `patches/6809-phase1.patch` | All modifications to Lua source |
 | `tools/luac_convert.py` | Bytecode endianness converter |
 | `run_tests.py` | Lua tests, each run in the emulator by `tools/runner.py` |
-| `tools/runner.py`, `harness.py`, `trace.py`, `visual.py` | Run bytecode on the installed `anachron8-emu` machine model: result only, verbose, with a CPU trace, Textual TUI |
+| `tools/runner.py`, `harness.py`, `trace_vm.py`, `visual.py` | Run bytecode on the installed `anachron8-emu` machine model: result only, verbose, with a CPU trace, Textual TUI |
 
 ## Technical Details
 

@@ -2,7 +2,7 @@
 """
 Test harness for running Lua VM on MC6809 emulator (with tracing)
 
-Run with: python tools/trace.py
+Run with: python tools/trace_vm.py
 """
 
 import array
