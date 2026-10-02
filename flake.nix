@@ -10,7 +10,7 @@
     nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     anachron8-emu = {
       url = "git+https://git.sherwood.haus/blark/anachron8-emu.git";
-      inputs.nixpkgs.follows = "nixpkgs-unstable";
+      inputs.nixpkgs.follows = "nixpkgs";
     };
   };
 
@@ -34,11 +34,13 @@
       perSystem =
         system:
         let
-          pkgs = import nixpkgs { inherit system; };
-          pkgsUnstable = import nixpkgs-unstable {
+          # The emulator's Python comes from the toolchain's nixpkgs, like
+          # gcc6809-nix's and anachron8-sw's; unstable is for uv and nixfmt.
+          pkgs = import nixpkgs {
             inherit system;
             overlays = [ anachron8-emu.overlays.default ];
           };
+          pkgsUnstable = import nixpkgs-unstable { inherit system; };
           toolchain = gcc6809.packages.${system}.default;
 
           luaOriginal = pkgs.fetchzip {
@@ -136,8 +138,8 @@
             echo "Done. Run 'direnv reload' to rebuild."
           '';
 
-          mc6809 = pkgsUnstable.python3Packages.mc6809;
-          pythonEnv = pkgsUnstable.python3.withPackages (ps: [ ps.anachron8-emu ]);
+          mc6809 = pkgs.python3Packages.mc6809;
+          pythonEnv = pkgs.python3.withPackages (ps: [ ps.anachron8-emu ]);
 
         in
         {
