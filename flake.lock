@@ -7,11 +7,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1790945298,
-        "narHash": "sha256-tGc/BTdHZ+Ek+Oyeht+txX19zZCiSE0DjPT5grQ2RkY=",
-        "ref": "emu-followups",
-        "rev": "55f48b82a061f979d174dd4b164ab7095db33a0a",
-        "revCount": 39,
+        "lastModified": 1790948764,
+        "narHash": "sha256-sfWxuOsm5GK1JzQOXXr94vwIHVqAonFvyzqtV/EX6iY=",
+        "ref": "refs/heads/main",
+        "rev": "2c93a1044d3bca5d18aab8a6ee78f279d32a8ce2",
+        "revCount": 42,
         "type": "git",
         "url": "https://git.sherwood.haus/blark/anachron8-emu.git"
       },
@@ -28,11 +28,11 @@
         "nixpkgs": "nixpkgs"
       },
       "locked": {
-        "lastModified": 1790941234,
-        "narHash": "sha256-a03oeqTHSPGIKyoN/FlTCmD5kEO2gfXz9Q85jAyRmTQ=",
+        "lastModified": 1790949299,
+        "narHash": "sha256-OjiRnKGcL+SMVEFxUE975TUjNWnaG029XgLxqcFuDYI=",
         "owner": "blark",
         "repo": "gcc6809-nix",
-        "rev": "1e01ee3f58a41a4bf3137f9c42ae092ec4190434",
+        "rev": "9bf848d513898d9ad0637e7135801f5b8bac87b4",
         "type": "github"
       },
       "original": {
