@@ -24,10 +24,8 @@
       ...
     }:
     let
-      systems = [
-        "x86_64-linux"
-        "aarch64-darwin"
-      ];
+      # gcc6809 builds on aarch64-darwin only; so does everything here.
+      systems = builtins.attrNames gcc6809.packages;
       forAllSystems = nixpkgs.lib.genAttrs systems;
 
       # Shared derivations per system
@@ -91,10 +89,7 @@
             meta = {
               description = "Lua 5.1 VM for MC6809 processor";
               license = pkgs.lib.licenses.mit;
-              platforms = [
-                "x86_64-linux"
-                "aarch64-darwin"
-              ];
+              platforms = systems;
             };
           };
 
