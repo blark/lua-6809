@@ -6,7 +6,7 @@
     nixpkgs.follows = "gcc6809/nixpkgs";
     nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     anachron8-emu = {
-      url = "git+https://git.sherwood.haus/blark/anachron8-emu.git?ref=extract/package";
+      url = "git+https://git.sherwood.haus/blark/anachron8-emu.git";
       inputs.nixpkgs.follows = "nixpkgs-unstable";
     };
   };

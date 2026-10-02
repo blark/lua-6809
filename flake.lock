@@ -12,14 +12,13 @@
       "locked": {
         "lastModified": 1790911769,
         "narHash": "sha256-GsIJOvu6mieQlVSvJQA7IzbRmWQKqAN4inSl8X3RlPE=",
-        "ref": "extract/package",
+        "ref": "refs/heads/main",
         "rev": "43eb971f895d79b8618c15573e4aa6792f8a16f3",
         "revCount": 32,
         "type": "git",
         "url": "https://git.sherwood.haus/blark/anachron8-emu.git"
       },
       "original": {
-        "ref": "extract/package",
         "type": "git",
         "url": "https://git.sherwood.haus/blark/anachron8-emu.git"
       }
